@@ -4,10 +4,16 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const connectDB = require('./db'); // ✅ Imported here
+const connectDB = require('./db');
+require('dotenv').config();
 
 const app = express();
-connectDB(); // ✅ Call this once, only here
+
+// Connect to MongoDB
+connectDB().catch(err => {
+  console.error('Failed to connect to MongoDB:', err);
+  // Don't exit process, let application handle the error gracefully
+});
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -33,31 +39,44 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(uploadsDir));
+
+// Health check route
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Server is running' });
+});
+
+// Root route
+app.get('/', (req, res) => {
+  res.json({ message: 'Welcome to the API' });
+});
 
 // Routes
 app.use('/api/gallery', require('./routes/gallery'));
 app.use('/api/projects', require('./routes/projects'));
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
-
-app.get('/', (req, res) => {
-  res.send('API running...');
-});
-
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ message: 'Something went wrong!' });
+  console.error('Error:', err);
+  res.status(500).json({ 
+    message: 'Something went wrong!',
+    error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+  });
 });
 
 // Handle 404 errors - This should be last
 app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+  res.status(404).json({ 
+    message: 'Route not found',
+    path: req.path
+  });
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
+});
