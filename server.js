@@ -35,7 +35,12 @@ const upload = multer({ storage: storage });
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://chetanbackend.onrender.com'],
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5137',
+    'https://silly-zuccutto-6e18a6.netlify.app',
+    'https://chetanbackend.onrender.com'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
