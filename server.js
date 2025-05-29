@@ -28,7 +28,11 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:3000', 'https://chetanbackend.onrender.com'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
 app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
 
@@ -42,6 +46,17 @@ app.get('/api/health', (req, res) => {
 
 app.get('/', (req, res) => {
   res.send('API running...');
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ message: 'Something went wrong!' });
+});
+
+// Handle 404 errors - This should be last
+app.use((req, res) => {
+  res.status(404).json({ message: 'Route not found' });
 });
 
 const PORT = process.env.PORT || 5000;
