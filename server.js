@@ -51,7 +51,13 @@ app.use(cors({
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Serve static files from uploads directory
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 app.use('/uploads', express.static(uploadsDir));
+console.log('Serving uploads from:', uploadsDir);
 
 // Database connection check middleware
 app.use((req, res, next) => {
