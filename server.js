@@ -48,7 +48,8 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'http://localhost:5137',
-  'https://silly-zuccutto-6e18a6.netlify.app'
+  'https://silly-zuccutto-6e18a6.netlify.app',
+  'https://chetanbackend.onrender.com'
 ];
 
 console.log('Configuring CORS with allowed origins:', allowedOrigins);
@@ -59,13 +60,14 @@ app.use(cors({
     if (!origin) return callback(null, true);
     
     if (allowedOrigins.indexOf(origin) === -1) {
-      console.log('Origin blocked:', origin);
-      return callback(null, false);
+      console.log('Blocked origin:', origin);
+      return callback(new Error('Not allowed by CORS'));
     }
     return callback(null, true);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 app.use(express.json());
