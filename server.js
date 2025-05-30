@@ -45,8 +45,13 @@ const upload = multer({
 
 // Middleware
 app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+  origin: [
+    'https://silly-zuccutto-6e18a6.netlify.app',
+    'http://localhost:3000',  // For local development
+    'http://localhost:5173'   // For Vite dev server
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: false
 }));
 
 app.use(express.json());
@@ -56,8 +61,19 @@ app.use(express.urlencoded({ extended: true }));
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
-app.use('/uploads', express.static(uploadsDir));
-console.log('Serving uploads from:', uploadsDir);
+
+// Log all requests
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
+// Configure static file serving with custom logging
+app.use('/uploads', (req, res, next) => {
+  console.log('Attempting to serve file:', req.url);
+  console.log('Full path:', path.join(uploadsDir, req.url));
+  next();
+}, express.static(uploadsDir));
 
 // Database connection check middleware
 app.use((req, res, next) => {
@@ -85,10 +101,9 @@ app.get('/health', (req, res) => {
 
 // Root route
 app.get('/', (req, res) => {
-  res.json({
+  res.json({ 
     status: 'ok',
-    timestamp: new Date().toISOString(),
-    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    uploadsPath: uploadsDir,
     environment: process.env.NODE_ENV || 'development'
   });
 });
