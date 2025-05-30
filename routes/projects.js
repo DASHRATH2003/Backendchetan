@@ -19,19 +19,40 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname));
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
 
-const upload = multer({ storage: storage });
+// File filter
+const fileFilter = (req, file, cb) => {
+  // Accept images only
+  if (!file.originalname.match(/\.(jpg|jpeg|png|gif)$/)) {
+    return cb(new Error('Only image files are allowed!'), false);
+  }
+  cb(null, true);
+};
+
+const upload = multer({ 
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 
 // Get all projects
 router.get('/', async (req, res) => {
   try {
     const projects = await Project.find().sort({ createdAt: -1 });
-    res.json(projects);
+    const projectsWithUrls = projects.map(project => ({
+      ...project.toObject(),
+      imageUrl: `${process.env.BACKEND_URL || 'https://chetanbackend.onrender.com'}${project.image}`
+    }));
+    res.json(projectsWithUrls);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Error fetching projects:', err);
+    res.status(500).json({ message: 'Error fetching projects' });
   }
 });
 
@@ -39,15 +60,16 @@ router.get('/', async (req, res) => {
 router.post('/', upload.single('image'), async (req, res) => {
   try {
     const { title, description, category, section, completed, year } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : '';
     
     if (!title) {
-      throw new Error('Title is required');
+      return res.status(400).json({ message: 'Title is required' });
     }
 
     if (!req.file) {
-      throw new Error('Image is required');
+      return res.status(400).json({ message: 'Image is required' });
     }
+    
+    const image = `/uploads/${req.file.filename}`;
     
     const project = new Project({
       title,
@@ -60,9 +82,14 @@ router.post('/', upload.single('image'), async (req, res) => {
     });
 
     const savedProject = await project.save();
-    res.status(201).json(savedProject);
+    const projectWithUrl = {
+      ...savedProject.toObject(),
+      imageUrl: `${process.env.BACKEND_URL || 'https://chetanbackend.onrender.com'}${savedProject.image}`
+    };
+    res.status(201).json(projectWithUrl);
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    console.error('Error creating project:', err);
+    res.status(400).json({ message: 'Error creating project' });
   }
 });
 
@@ -71,14 +98,11 @@ router.put('/:id', upload.single('image'), async (req, res) => {
   try {
     const { title, description, category, section, completed, year } = req.body;
     
-    // Get the existing project
     const existingProject = await Project.findById(req.params.id);
-    
     if (!existingProject) {
       return res.status(404).json({ message: 'Project not found' });
     }
 
-    // Prepare update data
     const updateData = {
       title: title || existingProject.title,
       description: description || existingProject.description,
@@ -88,9 +112,8 @@ router.put('/:id', upload.single('image'), async (req, res) => {
       year: year || existingProject.year
     };
     
-    // If there's a new image
     if (req.file) {
-      // Delete the old image if it exists
+      // Delete old image if it exists
       if (existingProject.image) {
         const oldImagePath = path.join(uploadsDir, path.basename(existingProject.image));
         if (fs.existsSync(oldImagePath)) {
@@ -106,16 +129,20 @@ router.put('/:id', upload.single('image'), async (req, res) => {
       { new: true }
     );
 
-    res.json(updatedProject);
+    const projectWithUrl = {
+      ...updatedProject.toObject(),
+      imageUrl: `${process.env.BACKEND_URL || 'https://chetanbackend.onrender.com'}${updatedProject.image}`
+    };
+    res.json(projectWithUrl);
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    console.error('Error updating project:', err);
+    res.status(400).json({ message: 'Error updating project' });
   }
 });
 
 // Delete project
 router.delete('/:id', async (req, res) => {
   try {
-    // Get the project first to get the image path
     const project = await Project.findById(req.params.id);
     
     if (!project) {
@@ -130,11 +157,11 @@ router.delete('/:id', async (req, res) => {
       }
     }
 
-    // Delete the project from the database
     await Project.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Project deleted' });
+    res.json({ message: 'Project deleted successfully' });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Error deleting project:', err);
+    res.status(500).json({ message: 'Error deleting project' });
   }
 });
 

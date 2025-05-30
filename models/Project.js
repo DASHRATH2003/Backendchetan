@@ -3,11 +3,13 @@ const mongoose = require('mongoose');
 const projectSchema = new mongoose.Schema({
   title: {
     type: String,
-    required: true
+    required: true,
+    trim: true
   },
   description: {
     type: String,
-    default: ''
+    default: '',
+    trim: true
   },
   image: {
     type: String,
@@ -15,11 +17,13 @@ const projectSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    default: ''
+    default: '',
+    trim: true
   },
   section: {
     type: String,
-    default: 'Banner'
+    default: 'Banner',
+    trim: true
   },
   completed: {
     type: Boolean,
@@ -27,10 +31,19 @@ const projectSchema = new mongoose.Schema({
   },
   year: {
     type: String,
-    default: () => new Date().getFullYear().toString()
+    default: () => new Date().getFullYear().toString(),
+    trim: true
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Virtual for full image URL
+projectSchema.virtual('imageUrl').get(function() {
+  if (!this.image) return null;
+  return `${process.env.BACKEND_URL || 'https://chetanbackend.onrender.com'}${this.image}`;
 });
 
 module.exports = mongoose.model('Project', projectSchema);
