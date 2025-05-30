@@ -64,7 +64,7 @@ if (!fs.existsSync(uploadsDir)) {
 
 // Log all requests
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path}`);
+  console.log(`${req.method} ${req.path} - MongoDB Status: ${mongoose.connection.readyState}`);
   next();
 });
 
@@ -74,19 +74,6 @@ app.use('/uploads', (req, res, next) => {
   console.log('Full path:', path.join(uploadsDir, req.url));
   next();
 }, express.static(uploadsDir));
-
-// Database connection check middleware
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path} - MongoDB Status: ${mongoose.connection.readyState}`);
-  if (mongoose.connection.readyState !== 1) {
-    console.warn('Database not connected for request:', req.path);
-    return res.status(503).json({
-      status: 'error',
-      message: 'Database connection is not ready. Please try again later.',
-    });
-  }
-  next();
-});
 
 // Health check
 app.get('/health', (req, res) => {
@@ -101,14 +88,48 @@ app.get('/health', (req, res) => {
 
 // Root route
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'ok',
     uploadsPath: uploadsDir,
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   });
 });
 
-// Routes
+// Debug routes - MUST be before the main routes
+app.get('/api/debug/projects', async (req, res) => {
+  try {
+    const Project = require('./models/Project');
+    const projects = await Project.find({}).lean();
+    console.log('Debug - Found projects:', projects);
+    res.json({
+      count: projects.length,
+      projects: projects,
+      mongoStatus: mongoose.connection.readyState
+    });
+  } catch (err) {
+    console.error('Debug - Error fetching projects:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/debug/gallery', async (req, res) => {
+  try {
+    const Gallery = require('./models/Gallery');
+    const gallery = await Gallery.find({}).lean();
+    console.log('Debug - Found gallery items:', gallery);
+    res.json({
+      count: gallery.length,
+      gallery: gallery,
+      mongoStatus: mongoose.connection.readyState
+    });
+  } catch (err) {
+    console.error('Debug - Error fetching gallery:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Main routes
 app.use('/api/gallery', require('./routes/gallery'));
 app.use('/api/projects', require('./routes/projects'));
 
@@ -125,8 +146,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
+// 404 handler - MUST be last
 app.use((req, res) => {
+  console.log('404 Not Found:', req.path);
   res.status(404).json({
     status: 'error',
     message: 'Route not found',
