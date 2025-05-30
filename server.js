@@ -44,30 +44,9 @@ const upload = multer({
 });
 
 // Middleware
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://localhost:5137',
-  'https://silly-zuccutto-6e18a6.netlify.app',
-  'https://chetanbackend.onrender.com'
-];
-
-console.log('Configuring CORS with allowed origins:', allowedOrigins);
-
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) === -1) {
-      console.log('Blocked origin:', origin);
-      return callback(new Error('Not allowed by CORS'));
-    }
-    return callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
 
 app.use(express.json());
