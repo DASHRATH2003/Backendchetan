@@ -3,17 +3,25 @@ const mongoose = require('mongoose');
 const projectSchema = new mongoose.Schema({
   title: {
     type: String,
-    required: true,
-    trim: true
+    required: [true, 'Title is required'],
+    trim: true,
+    maxlength: [100, 'Title cannot be more than 100 characters']
   },
   description: {
     type: String,
     default: '',
-    trim: true
+    trim: true,
+    maxlength: [1000, 'Description cannot be more than 1000 characters']
   },
   image: {
     type: String,
-    required: true,
+    required: [true, 'Image is required'],
+    validate: {
+      validator: function(v) {
+        return v && (v.startsWith('http') || v.startsWith('/uploads/'));
+      },
+      message: 'Invalid image path format'
+    },
     get: function(image) {
       if (!image) return null;
 
@@ -28,19 +36,24 @@ const projectSchema = new mongoose.Schema({
       }
 
       // Use the production URL for deployed version
-      const baseUrl = 'https://chetanbackend.onrender.com';
+      const baseUrl = process.env.BACKEND_URL || 'https://chetanbackend.onrender.com';
       return `${baseUrl}${image}`;
     }
   },
   category: {
     type: String,
     default: '',
-    trim: true
+    trim: true,
+    maxlength: [50, 'Category cannot be more than 50 characters']
   },
   section: {
     type: String,
     default: 'Banner',
-    trim: true
+    trim: true,
+    enum: {
+      values: ['Banner', 'Featured', 'Regular'],
+      message: '{VALUE} is not a valid section'
+    }
   },
   completed: {
     type: Boolean,
@@ -49,7 +62,13 @@ const projectSchema = new mongoose.Schema({
   year: {
     type: String,
     default: () => new Date().getFullYear().toString(),
-    trim: true
+    trim: true,
+    validate: {
+      validator: function(v) {
+        return /^\d{4}$/.test(v);
+      },
+      message: 'Year must be a 4-digit number'
+    }
   }
 }, {
   timestamps: true,
@@ -57,10 +76,33 @@ const projectSchema = new mongoose.Schema({
   toObject: { getters: true, virtuals: true }
 });
 
+// Add error handling middleware
+projectSchema.post('save', function(error, doc, next) {
+  if (error.name === 'MongoServerError' && error.code === 11000) {
+    next(new Error('A project with this title already exists'));
+  } else {
+    next(error);
+  }
+});
+
 // Virtual for full image URL
 projectSchema.virtual('imageUrl').get(function() {
   if (!this.image) return null;
-  return `${process.env.BACKEND_URL || 'https://chetanbackend.onrender.com'}${this.image}`;
+  const baseUrl = process.env.BACKEND_URL || 'https://chetanbackend.onrender.com';
+  return this.image.startsWith('http') ? this.image : `${baseUrl}${this.image}`;
 });
 
-module.exports = mongoose.model('Project', projectSchema);
+// Ensure indexes
+projectSchema.index({ title: 1 });
+projectSchema.index({ category: 1 });
+projectSchema.index({ section: 1 });
+projectSchema.index({ year: 1 });
+
+const Project = mongoose.model('Project', projectSchema);
+
+// Create indexes
+Project.createIndexes().catch(err => {
+  console.error('Error creating indexes:', err);
+});
+
+module.exports = Project;

@@ -13,13 +13,30 @@ const app = express();
 console.log('Starting server...');
 console.log('Environment:', process.env.NODE_ENV || 'development');
 
-// Connect to MongoDB
+// Connect to MongoDB with enhanced logging
 console.log('Attempting to connect to MongoDB...');
 console.log('MongoDB URI:', process.env.MONGODB_URI ? 'Set' : 'Not set');
+
+// Add global error handler for unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Add global error handler for uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+});
 
 connectDB().then(() => {
   console.log('✅ MongoDB connected successfully');
   console.log('MongoDB Status:', mongoose.connection.readyState);
+  
+  // Log MongoDB connection details
+  const db = mongoose.connection;
+  console.log('Database name:', db.name);
+  console.log('Host:', db.host);
+  console.log('Port:', db.port);
+  
   // Log the available collections
   mongoose.connection.db.listCollections().toArray((err, collections) => {
     if (err) {
@@ -31,6 +48,20 @@ connectDB().then(() => {
 }).catch(err => {
   console.error('❌ MongoDB connection failed:', err.message);
   console.error('Full error:', err);
+  console.error('Stack trace:', err.stack);
+});
+
+// Monitor MongoDB connection events
+mongoose.connection.on('error', (err) => {
+  console.error('MongoDB error event:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('MongoDB disconnected');
+});
+
+mongoose.connection.on('reconnected', () => {
+  console.log('MongoDB reconnected');
 });
 
 // Middleware
