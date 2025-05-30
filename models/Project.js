@@ -13,7 +13,20 @@ const projectSchema = new mongoose.Schema({
   },
   image: {
     type: String,
-    required: true
+    required: true,
+    get: function(image) {
+      // If it's already a full URL, return as is
+      if (image && image.startsWith('http')) {
+        return image;
+      }
+      // If it's a relative path, ensure it starts with /uploads/
+      if (image && !image.startsWith('/uploads/')) {
+        image = '/uploads/' + image.replace(/^\/+/, '');
+      }
+      // Return the full URL
+      const baseUrl = process.env.BACKEND_URL || 'http://localhost:5000';
+      return `${baseUrl}${image}`;
+    }
   },
   category: {
     type: String,
@@ -36,8 +49,8 @@ const projectSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
+  toJSON: { getters: true, virtuals: true },
+  toObject: { getters: true, virtuals: true }
 });
 
 // Virtual for full image URL

@@ -14,66 +14,110 @@ console.log('Starting server...');
 console.log('Environment:', process.env.NODE_ENV || 'development');
 
 // Connect to MongoDB
+console.log('Attempting to connect to MongoDB...');
+console.log('MongoDB URI:', process.env.MONGODB_URI ? 'Set' : 'Not set');
+
 connectDB().then(() => {
-  console.log('✅ MongoDB connected');
+  console.log('✅ MongoDB connected successfully');
+  console.log('MongoDB Status:', mongoose.connection.readyState);
+  // Log the available collections
+  mongoose.connection.db.listCollections().toArray((err, collections) => {
+    if (err) {
+      console.error('Error listing collections:', err);
+    } else {
+      console.log('Available collections:', collections.map(c => c.name));
+    }
+  });
 }).catch(err => {
   console.error('❌ MongoDB connection failed:', err.message);
-});
-
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  console.log('Creating uploads directory:', uploadsDir);
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Configure multer
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB
+  console.error('Full error:', err);
 });
 
 // Middleware
+const allowedOrigins = [
+  'http://localhost:5137',  // Vite dev server
+  'http://localhost:5173',  // Alternative Vite port
+  'http://localhost:3000',  // React default
+  'https://silly-zuccutto-6e18a6.netlify.app'  // Production
+];
+
+// Log all requests
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path} from origin: ${req.headers.origin}`);
+  next();
+});
+
 app.use(cors({
-  origin: [
-    'https://silly-zuccutto-6e18a6.netlify.app',
-    'http://localhost:3000',  // For local development
-    'http://localhost:5173'   // For Vite dev server
-  ],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      console.log('Origin not allowed:', origin);
+      console.log('Allowed origins:', allowedOrigins);
+    }
+    
+    // Allow all origins in development
+    if (process.env.NODE_ENV === 'development') {
+      return callback(null, true);
+    }
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, true);
+    } else {
+      return callback(null, false);
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  credentials: false
+  credentials: true,
+  optionsSuccessStatus: 200
 }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from uploads directory
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('Created uploads directory:', uploadsDir);
 }
 
-// Log all requests
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path} - MongoDB Status: ${mongoose.connection.readyState}`);
-  next();
-});
-
-// Configure static file serving with custom logging
+// Configure static file serving with detailed logging
 app.use('/uploads', (req, res, next) => {
-  console.log('Attempting to serve file:', req.url);
-  console.log('Full path:', path.join(uploadsDir, req.url));
+  const filePath = path.join(uploadsDir, req.path);
+  console.log('Attempting to serve file:', {
+    requestPath: req.path,
+    fullPath: filePath,
+    exists: fs.existsSync(filePath)
+  });
   next();
 }, express.static(uploadsDir));
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    // Ensure unique filename and preserve extension
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, uniqueSuffix + ext);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: function (req, file, cb) {
+    // Accept images only
+    if (!file.originalname.match(/\.(jpg|jpeg|png|gif|webp)$/)) {
+      return cb(new Error('Only image files are allowed!'), false);
+    }
+    cb(null, true);
+  }
+});
 
 // Health check
 app.get('/health', (req, res) => {
@@ -156,8 +200,10 @@ app.use((req, res) => {
   });
 });
 
-// Use port 5001 to avoid EADDRINUSE error
-const PORT = process.env.PORT || 5001;
+// Use port 5000 by default
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
+  console.log(`Health check available at http://localhost:${PORT}/health`);
+  console.log(`API endpoints available at http://localhost:${PORT}/api/*`);
 });

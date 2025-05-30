@@ -2,25 +2,41 @@
 const mongoose = require('mongoose');
 require('dotenv').config();
 
+const getMongoURI = () => {
+  // Try to get from environment variable first
+  const envURI = process.env.MONGODB_URI;
+  if (envURI) {
+    return envURI;
+  }
+
+  // Fallback configuration
+  const username = process.env.MONGO_USER || 'dashrath2003';
+  const password = process.env.MONGO_PASSWORD || 'HSXgM4gZPMwiNirG';
+  const cluster = process.env.MONGO_CLUSTER || 'cluster0.n2ehu92';
+  const dbName = process.env.MONGO_DB || 'myDatabase';
+
+  return `mongodb+srv://${username}:${password}@${cluster}.mongodb.net/${dbName}?retryWrites=true&w=majority`;
+};
+
 const connectWithRetry = async (retries = 5, delay = 5000) => {
-  const mongoURI = process.env.MONGODB_URI || 'mongodb+srv://dashrath2003:HSXgM4gZPMwiNirG@cluster0.n2ehu92.mongodb.net/myDatabase?retryWrites=true&w=majority&authSource=admin';
+  const mongoURI = getMongoURI();
+  console.log('Attempting to connect to MongoDB...');
+  console.log('Using database:', mongoURI.split('@')[1]); // Log only the non-sensitive part
   
   for (let i = 0; i < retries; i++) {
     try {
-      console.log('Attempting to connect to MongoDB...');
+      console.log(`Connection attempt ${i + 1}/${retries}`);
       
       const conn = await mongoose.connect(mongoURI, {
         useNewUrlParser: true,
         useUnifiedTopology: true,
-        serverSelectionTimeoutMS: 30000, // Increased timeout
+        serverSelectionTimeoutMS: 30000,
         socketTimeoutMS: 45000,
         retryWrites: true,
         w: 'majority',
-        connectTimeoutMS: 30000, // Increased timeout
+        connectTimeoutMS: 30000,
         heartbeatFrequencyMS: 2000,
-        authSource: 'admin',
-        maxPoolSize: 10, // Updated from poolSize to maxPoolSize
-        family: 4 // Force IPv4
+        maxPoolSize: 10
       });
 
       console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
@@ -46,21 +62,11 @@ const connectWithRetry = async (retries = 5, delay = 5000) => {
 
       return conn;
     } catch (err) {
-      console.error(`❌ MongoDB connection attempt ${i + 1} failed`);
-      
-      if (err.name === 'MongoServerSelectionError') {
-        console.error('Could not connect to MongoDB servers. Please check:');
-        console.error('1. Your IP address is whitelisted in MongoDB Atlas');
-        console.error('2. Your MongoDB Atlas username and password are correct');
-        console.error('3. Your network connection is stable');
-        console.error(`Error message: ${err.message}`);
-      } else {
-        console.error('Error details:', err);
-      }
+      console.error(`❌ MongoDB connection attempt ${i + 1} failed:`, err.message);
       
       if (i === retries - 1) {
         console.error('Failed to connect to MongoDB after all retries');
-        throw new Error(`Failed to connect to MongoDB after ${retries} attempts`);
+        throw err;
       }
       
       console.log(`Retrying in ${delay/1000} seconds...`);
