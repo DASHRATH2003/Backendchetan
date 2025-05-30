@@ -37,41 +37,42 @@ connectDB().then(() => {
 const allowedOrigins = [
   'http://localhost:5137',  // Vite dev server
   'http://localhost:5173',  // Alternative Vite port
-  'http://localhost:3000',  // React default
-  'https://silly-zuccutto-6e18a6.netlify.app'  // Production
+  'https://silly-zuccutto-6e18a6.netlify.app',  // Production
+  'https://chetanbackend.onrender.com'  // Backend URL
 ];
 
 // Log all requests
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path} from origin: ${req.headers.origin}`);
+  const origin = req.headers.origin;
+  console.log(`${req.method} ${req.path} from origin:`, origin);
+  console.log('Request headers:', req.headers);
   next();
 });
 
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    if (!origin) {
+      console.log('Allowing request with no origin');
+      return callback(null, true);
+    }
     
     if (allowedOrigins.indexOf(origin) === -1) {
       console.log('Origin not allowed:', origin);
       console.log('Allowed origins:', allowedOrigins);
-    }
-    
-    // Allow all origins in development
-    if (process.env.NODE_ENV === 'development') {
-      return callback(null, true);
-    }
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      return callback(null, true);
     } else {
-      return callback(null, false);
+      console.log('Origin allowed:', origin);
     }
+    
+    callback(null, true); // Allow all origins in production
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
   optionsSuccessStatus: 200
 }));
+
+// Enable pre-flight requests for all routes
+app.options('*', cors());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

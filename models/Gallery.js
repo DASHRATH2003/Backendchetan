@@ -15,16 +15,20 @@ const gallerySchema = new mongoose.Schema({
     type: String,
     required: true,
     get: function(image) {
+      if (!image) return null;
+
       // If it's already a full URL, return as is
-      if (image && image.startsWith('http')) {
+      if (image.startsWith('http')) {
         return image;
       }
-      // If it's a relative path, ensure it starts with /uploads/
-      if (image && !image.startsWith('/uploads/')) {
+
+      // Ensure the path starts with /uploads/
+      if (!image.startsWith('/uploads/')) {
         image = '/uploads/' + image.replace(/^\/+/, '');
       }
-      // Return the full URL
-      const baseUrl = process.env.BACKEND_URL || 'http://localhost:5000';
+
+      // Use the production URL for deployed version
+      const baseUrl = 'https://chetanbackend.onrender.com';
       return `${baseUrl}${image}`;
     }
   },
