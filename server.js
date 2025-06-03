@@ -24,8 +24,6 @@ app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://localhost:5000',
-    'https://mychetan-frontend-t8zk.vercel.app',
-    'https://mychetanportfolio.netlify.app'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
