@@ -24,14 +24,15 @@ app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://localhost:5000',
-    ''
+    'https://frontendchetan.vercel.app'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  credentials: true,
+  optionsSuccessStatus: 200
 }));
 
-// Enable pre-flight requests for all routes
+// Enable pre-flight requests
 app.options('*', cors());
 
 app.use(express.json());
@@ -117,7 +118,10 @@ app.use('/uploads', express.static(uploadsDir, {
     }
 
     // Set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', 'https://frontendchetan.vercel.app');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
   }
