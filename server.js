@@ -21,7 +21,7 @@ connectDB().catch(err => {
 
 // Enable CORS with proper configuration
 app.use(cors({
-  origin: ['http://localhost:5137', 'http://localhost:5173', 'https://chetanfrontend.onrender.com'],
+  origin: ['http://localhost:5137', 'http://localhost:5173', 'https://silly-zuccutto-6e18a6.netlify.app/'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
