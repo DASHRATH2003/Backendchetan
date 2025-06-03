@@ -15,45 +15,33 @@ const projectSchema = new mongoose.Schema({
   },
   image: {
     type: String,
-    required: [true, 'Image is required'],
+    required: [true, 'Image path is required'],
     validate: {
       validator: function(v) {
-        return v && (v.startsWith('http') || v.startsWith('/uploads/'));
+        return v.startsWith('/uploads/');
       },
-      message: 'Invalid image path format'
-    },
-    get: function(image) {
-      if (!image) return null;
-
-      // If it's already a full URL, return as is
-      if (image.startsWith('http')) {
-        return image;
-      }
-
-      // Ensure the path starts with /uploads/
-      if (!image.startsWith('/uploads/')) {
-        image = '/uploads/' + image.replace(/^\/+/, '');
-      }
-
-      // Use the production URL for deployed version
-      const baseUrl = process.env.BACKEND_URL || 'https://chetanbackend.onrender.com';
-      return `${baseUrl}${image}`;
+      message: 'Image path must start with /uploads/'
+    }
+  },
+  imageUrl: {
+    type: String,
+    required: [true, 'Image URL is required'],
+    validate: {
+      validator: function(v) {
+        return v.startsWith('http://') || v.startsWith('https://');
+      },
+      message: 'Image URL must be a valid HTTP/HTTPS URL'
     }
   },
   category: {
     type: String,
-    default: '',
     trim: true,
-    maxlength: [50, 'Category cannot be more than 50 characters']
+    default: ''
   },
   section: {
     type: String,
-    default: 'Banner',
-    trim: true,
-    enum: {
-      values: ['Banner', 'Featured', 'Regular'],
-      message: '{VALUE} is not a valid section'
-    }
+    enum: ['Banner', 'Featured', 'Regular'],
+    default: 'Banner'
   },
   completed: {
     type: Boolean,
@@ -61,14 +49,7 @@ const projectSchema = new mongoose.Schema({
   },
   year: {
     type: String,
-    default: () => new Date().getFullYear().toString(),
-    trim: true,
-    validate: {
-      validator: function(v) {
-        return /^\d{4}$/.test(v);
-      },
-      message: 'Year must be a 4-digit number'
-    }
+    default: () => new Date().getFullYear().toString()
   }
 }, {
   timestamps: true,
@@ -85,24 +66,6 @@ projectSchema.post('save', function(error, doc, next) {
   }
 });
 
-// Virtual for full image URL
-projectSchema.virtual('imageUrl').get(function() {
-  if (!this.image) return null;
-  const baseUrl = process.env.BACKEND_URL || 'https://chetanbackend.onrender.com';
-  return this.image.startsWith('http') ? this.image : `${baseUrl}${this.image}`;
-});
-
-// Ensure indexes
-projectSchema.index({ title: 1 });
-projectSchema.index({ category: 1 });
-projectSchema.index({ section: 1 });
-projectSchema.index({ year: 1 });
-
 const Project = mongoose.model('Project', projectSchema);
-
-// Create indexes
-Project.createIndexes().catch(err => {
-  console.error('Error creating indexes:', err);
-});
 
 module.exports = Project;
