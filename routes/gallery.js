@@ -1,155 +1,279 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const cloudinary = require('../config/cloudinary');
+const path = require('path');
+const fs = require('fs');
 const Gallery = require('../models/Gallery');
 
-// Configure multer for memory storage
-const storage = multer.memoryStorage();
+// Get the uploads directory path
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+
+// Ensure uploads directory exists
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('Created uploads directory:', uploadsDir);
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    // Ensure directory exists before saving
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    console.log('Saving file to:', uploadsDir);
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const filename = `gallery-${timestamp}${ext}`;
+    console.log('Generated filename:', filename);
+    cb(null, filename);
+  }
+});
+
 const upload = multer({
   storage: storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
-  },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
+    console.log('Processing file upload:', file.originalname);
+    const allowedTypes = /jpeg|jpg|png|gif|webp/i;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (extname && mimetype) {
+      console.log('File accepted:', file.originalname, 'Mimetype:', file.mimetype);
+      return cb(null, true);
     } else {
-      cb(new Error('Not an image! Please upload an image.'), false);
+      console.log('File rejected:', file.originalname, 'Mimetype:', file.mimetype);
+      cb(new Error('Only image files (jpg, jpeg, png, gif, webp) are allowed!'));
     }
+  },
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB
   }
 });
 
 // Get all gallery items
 router.get('/', async (req, res) => {
   try {
+    console.log('Fetching gallery items...');
     const items = await Gallery.find().sort({ createdAt: -1 });
-    res.json(items);
-  } catch (error) {
-    console.error('Error fetching gallery items:', error);
-    res.status(500).json({ message: 'Error fetching gallery items', error: error.message });
+    console.log(`Found ${items.length} gallery items`);
+
+    // Add full URLs to the items
+    const itemsWithUrls = items.map(item => {
+      const fullUrl = `${req.protocol}://${req.get('host')}${item.image}`;
+      return {
+        ...item.toObject(),
+        imageUrl: fullUrl
+      };
+    });
+
+    res.json(itemsWithUrls);
+  } catch (err) {
+    console.error('Error fetching gallery items:', err);
+    res.status(500).json({ message: err.message });
   }
 });
 
 // Add new gallery item
 router.post('/', upload.single('image'), async (req, res) => {
+  let uploadedFilePath = null;
+  
   try {
+    console.log('Received gallery item creation request');
+    console.log('Request body:', req.body);
+    console.log('File details:', req.file);
+
     if (!req.file) {
-      return res.status(400).json({ message: 'Please upload an image' });
+      console.error('No file uploaded');
+      return res.status(400).json({ message: 'Image is required' });
     }
 
     const { title, description } = req.body;
+    
     if (!title) {
+      console.error('Title is missing');
       return res.status(400).json({ message: 'Title is required' });
     }
 
-    // Upload to Cloudinary
-    const b64 = Buffer.from(req.file.buffer).toString('base64');
-    const dataURI = `data:${req.file.mimetype};base64,${b64}`;
+    // Store the uploaded file path for potential cleanup
+    uploadedFilePath = path.join(uploadsDir, req.file.filename);
     
-    const cloudinaryResponse = await cloudinary.uploader.upload(dataURI, {
-      folder: 'gallery',
-      resource_type: 'auto'
+    // Verify file was saved
+    console.log('Checking if file exists at:', uploadedFilePath);
+    if (!fs.existsSync(uploadedFilePath)) {
+      console.error('File was not saved:', uploadedFilePath);
+      return res.status(500).json({ message: 'File upload failed - file not found after save' });
+    }
+    
+    // Verify file is readable
+    try {
+      await fs.promises.access(uploadedFilePath, fs.constants.R_OK);
+      console.log('File is readable:', uploadedFilePath);
+    } catch (err) {
+      console.error('File is not readable:', err);
+      return res.status(500).json({ message: 'File upload failed - file not readable' });
+    }
+
+    // Get file stats
+    const stats = await fs.promises.stat(uploadedFilePath);
+    console.log('File stats:', {
+      size: stats.size,
+      created: stats.birthtime,
+      modified: stats.mtime
     });
 
-    // Create new gallery item
-    const galleryItem = new Gallery({
+    // Construct the image path and URL
+    const image = `/uploads/${req.file.filename}`;
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://backendchetan.onrender.com' 
+      : `${protocol}://${req.get('host')}`;
+    const imageUrl = `${baseUrl}${image}`;
+    
+    console.log('Image path:', image);
+    console.log('Base URL:', baseUrl);
+    console.log('Full image URL:', imageUrl);
+
+    // Create gallery item
+    const galleryData = {
       title,
-      description,
-      image: cloudinaryResponse.secure_url,
-      cloudinary_id: cloudinaryResponse.public_id,
-      alt: title
-    });
+      description: description || '',
+      image,
+      imageUrl
+    };
+
+    console.log('Creating gallery item with data:', galleryData);
+
+    const galleryItem = new Gallery(galleryData);
+    console.log('Gallery model created:', galleryItem);
 
     const savedItem = await galleryItem.save();
-    res.status(201).json(savedItem);
+    console.log('Gallery item saved successfully:', savedItem);
+    
+    return res.status(201).json(savedItem);
 
-  } catch (error) {
-    console.error('Error creating gallery item:', error);
-    res.status(500).json({ message: 'Error creating gallery item', error: error.message });
+  } catch (err) {
+    console.error('Error in gallery item creation:', err);
+
+    // Clean up uploaded file if it exists and there was an error
+    if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
+      try {
+        fs.unlinkSync(uploadedFilePath);
+        console.log('Cleaned up uploaded file after error');
+      } catch (cleanupErr) {
+        console.error('Error cleaning up file:', cleanupErr);
+      }
+    }
+
+    return res.status(500).json({ 
+      message: 'Internal server error',
+      error: err.message,
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 });
 
 // Update gallery item
 router.put('/:id', upload.single('image'), async (req, res) => {
   try {
-    const { id } = req.params;
-    const { title, description } = req.body;
+    console.log('Updating gallery item:', req.params.id);
+    console.log('Update data:', req.body);
+    console.log('File:', req.file);
 
-    const galleryItem = await Gallery.findById(id);
-    if (!galleryItem) {
+    const existingItem = await Gallery.findById(req.params.id);
+    if (!existingItem) {
+      console.error('Gallery item not found:', req.params.id);
       return res.status(404).json({ message: 'Gallery item not found' });
     }
 
     const updateData = {
-      title: title || galleryItem.title,
-      description: description || galleryItem.description
+      title: req.body.title || existingItem.title,
+      description: req.body.description || existingItem.description
     };
 
-    // If new image is uploaded
     if (req.file) {
-      // Delete old image from Cloudinary
-      if (galleryItem.cloudinary_id) {
-        await cloudinary.uploader.destroy(galleryItem.cloudinary_id);
+      // Delete old image if it exists
+      if (existingItem.image) {
+        const oldImagePath = path.join(uploadsDir, path.basename(existingItem.image));
+        if (fs.existsSync(oldImagePath)) {
+          fs.unlinkSync(oldImagePath);
+          console.log('Deleted old image:', oldImagePath);
+        }
       }
 
-      // Upload new image
-      const b64 = Buffer.from(req.file.buffer).toString('base64');
-      const dataURI = `data:${req.file.mimetype};base64,${b64}`;
-      
-      const cloudinaryResponse = await cloudinary.uploader.upload(dataURI, {
-        folder: 'gallery',
-        resource_type: 'auto'
-      });
+      // Verify new file was saved
+      const newFilePath = path.join(uploadsDir, req.file.filename);
+      if (!fs.existsSync(newFilePath)) {
+        console.error('New file was not saved:', newFilePath);
+        return res.status(500).json({ message: 'File upload failed - file not found after save' });
+      }
+      console.log('New file saved successfully at:', newFilePath);
 
-      updateData.image = cloudinaryResponse.secure_url;
-      updateData.cloudinary_id = cloudinaryResponse.public_id;
+      updateData.image = `/uploads/${req.file.filename}`;
     }
 
     const updatedItem = await Gallery.findByIdAndUpdate(
-      id,
+      req.params.id,
       updateData,
       { new: true }
     );
 
-    res.json(updatedItem);
-  } catch (error) {
-    console.error('Error updating gallery item:', error);
-    res.status(500).json({ message: 'Error updating gallery item', error: error.message });
+    // Return the full item data including the complete image URL
+    const fullItem = {
+      ...updatedItem.toObject(),
+      imageUrl: `${req.protocol}://${req.get('host')}${updatedItem.image}`
+    };
+
+    console.log('Gallery item updated successfully:', fullItem);
+    res.json(fullItem);
+  } catch (err) {
+    console.error('Error updating gallery item:', err);
+    res.status(500).json({ message: err.message });
   }
 });
 
 // Delete gallery item
 router.delete('/:id', async (req, res) => {
   try {
-    const galleryItem = await Gallery.findById(req.params.id);
-    if (!galleryItem) {
+    const item = await Gallery.findById(req.params.id);
+    if (!item) {
       return res.status(404).json({ message: 'Gallery item not found' });
     }
 
-    // Delete image from Cloudinary
-    if (galleryItem.cloudinary_id) {
-      await cloudinary.uploader.destroy(galleryItem.cloudinary_id);
+    // Delete the image file if it exists
+    if (item.image) {
+      const imagePath = path.join(uploadsDir, path.basename(item.image));
+      if (fs.existsSync(imagePath)) {
+        fs.unlinkSync(imagePath);
+        console.log('Deleted image file:', imagePath);
+      }
     }
 
     await Gallery.findByIdAndDelete(req.params.id);
+    console.log('Gallery item deleted successfully:', req.params.id);
     res.json({ message: 'Gallery item deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting gallery item:', error);
-    res.status(500).json({ message: 'Error deleting gallery item', error: error.message });
+  } catch (err) {
+    console.error('Error deleting gallery item:', err);
+    res.status(500).json({ message: err.message });
   }
 });
 
 // Delete all gallery items
 router.delete('/', async (req, res) => {
   try {
-    // Get all gallery items to get their image paths
+    // Get all items to get their image paths
     const items = await Gallery.find();
     
     // Delete all image files
     for (const item of items) {
       if (item.image) {
-        await cloudinary.uploader.destroy(item.cloudinary_id);
+        const imagePath = path.join(uploadsDir, path.basename(item.image));
+        if (fs.existsSync(imagePath)) {
+          fs.unlinkSync(imagePath);
+        }
       }
     }
 
@@ -158,32 +282,6 @@ router.delete('/', async (req, res) => {
     
     res.json({ message: 'All gallery items deleted successfully' });
   } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Cleanup endpoint to remove entries with missing files
-router.post('/cleanup', async (req, res) => {
-  try {
-    const galleries = await Gallery.find();
-    const removedCount = { total: 0 };
-
-    for (const gallery of galleries) {
-      if (gallery.image) {
-        await cloudinary.uploader.destroy(gallery.cloudinary_id);
-        removedCount.total++;
-      }
-    }
-
-    // Delete all items from database
-    await Gallery.deleteMany({});
-    
-    res.json({ 
-      message: 'Cleanup completed successfully', 
-      removedEntries: removedCount.total 
-    });
-  } catch (err) {
-    console.error('Error during cleanup:', err);
     res.status(500).json({ message: err.message });
   }
 });

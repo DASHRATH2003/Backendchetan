@@ -3,35 +3,21 @@ const mongoose = require('mongoose');
 const gallerySchema = new mongoose.Schema({
   title: {
     type: String,
-    required: [true, 'Title is required'],
-    trim: true,
-    maxlength: [100, 'Title cannot be more than 100 characters']
+    required: [true, 'Title is required']
   },
   description: {
     type: String,
-    default: '',
-    trim: true,
-    maxlength: [500, 'Description cannot be more than 500 characters']
+    default: ''
   },
   image: {
     type: String,
-    required: [true, 'Image URL is required']
+    required: [true, 'Image path is required']
   },
-  cloudinary_id: {
-    type: String,
-    required: true
-  },
-  alt: {
-    type: String,
-    trim: true,
-    default: function() {
-      return this.title || 'Gallery image';
-    }
+  imageUrl: {
+    type: String
   }
 }, {
-  timestamps: true,
-  toJSON: { getters: true, virtuals: true },
-  toObject: { getters: true, virtuals: true }
+  timestamps: true
 });
 
 // Add error handling middleware
