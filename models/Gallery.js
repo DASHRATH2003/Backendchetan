@@ -15,11 +15,11 @@ const gallerySchema = new mongoose.Schema({
   },
   image: {
     type: String,
-    required: [true, 'Image is required']
-  },
-  imageUrl: {
-    type: String,
     required: [true, 'Image URL is required']
+  },
+  cloudinary_id: {
+    type: String,
+    required: true
   },
   alt: {
     type: String,
@@ -41,29 +41,6 @@ gallerySchema.post('save', function(error, doc, next) {
   } else {
     next(error);
   }
-});
-
-// Add a pre-save middleware to clean up image paths and set imageUrl
-gallerySchema.pre('save', function(next) {
-  if (this.image) {
-    // If it's already a full URL, leave it as is
-    if (this.image.startsWith('http')) {
-      this.imageUrl = this.image;
-      next();
-      return;
-    }
-    
-    // Clean up the path and ensure it starts with /uploads/
-    const cleanPath = this.image.replace(/^\/+/, '').replace(/^uploads\//, '');
-    this.image = `/uploads/${cleanPath}`;
-    
-    // Set the imageUrl based on environment
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://chetanbackend.onrender.com' 
-      : 'http://localhost:5000';
-    this.imageUrl = `${baseUrl}${this.image}`;
-  }
-  next();
 });
 
 // Ensure indexes
