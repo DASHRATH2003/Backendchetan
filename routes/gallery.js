@@ -128,7 +128,7 @@ router.post('/', upload.single('image'), async (req, res) => {
 
     // Construct the full image URL
     const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://chetanbackend.onrender.com' 
+      ? 'https://mychetanbackend.onrender.com' 
       : 'http://localhost:5000';
     const imageUrl = `${baseUrl}${image}`;
     console.log('Full image URL:', imageUrl);
