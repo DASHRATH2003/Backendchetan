@@ -25,41 +25,66 @@ if (!fs.existsSync(uploadsDir)) {
   console.log('Created uploads directory at:', uploadsDir);
 }
 
-// Enable CORS with proper configuration
-app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:5137',
-    'http://localhost:5000',
-    'https://frontendchetan.vercel.app',
-    'https://backendchetan.onrender.com',
-    'https://www.chethancinemas.com/'
-  ],
+// Configure allowed origins
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5137',
+  'http://localhost:5000',
+  'https://frontendchetan.vercel.app',
+  'https://www.chethancinemas.com' // No trailing slash
+];
+
+// Enhanced CORS configuration
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.error('CORS blocked for origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   credentials: true,
-  optionsSuccessStatus: 200
-}));
+  optionsSuccessStatus: 200,
+  maxAge: 86400 // 24 hours
+};
 
-app.options('*', cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Apply CORS middleware
+app.use(cors(corsOptions));
 
-// Ensure uploads directory exists
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-  console.log('Created uploads directory:', uploadsDir);
-} else {
-  console.log('Uploads directory exists:', uploadsDir);
-  try {
-    const files = fs.readdirSync(uploadsDir);
-    console.log('Uploads directory contents:', files);
-  } catch (err) {
-    console.error('Error reading uploads directory:', err);
-  }
-}
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log('Incoming request:', {
+    origin: req.headers.origin,
+    method: req.method,
+    path: req.path,
+    headers: req.headers
+  });
+  next();
+});
 
-// Multer setup
+// Explicit OPTIONS handler for preflight requests
+app.options('*', cors(corsOptions));
+
+// Body parsers
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Security headers middleware
+app.use((req, res, next) => {
+  res.header('X-Frame-Options', 'DENY');
+  res.header('X-XSS-Protection', '1; mode=block');
+  res.header('X-Content-Type-Options', 'nosniff');
+  res.header('Referrer-Policy', 'same-origin');
+  next();
+});
+
+// Multer setup for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     if (!fs.existsSync(uploadsDir)) {
@@ -88,58 +113,11 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 }
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB
 });
 
-// Serve uploads with logging
-app.use('/uploads', (req, res, next) => {
-  const requestedFile = req.url;
-  const filePath = path.join(uploadsDir, requestedFile);
-  
-  console.log('Static file request:', {
-    url: requestedFile,
-    fullPath: filePath,
-    exists: fs.existsSync(filePath)
-  });
-
-  // List all files in uploads directory
-  try {
-    const files = fs.readdirSync(uploadsDir);
-    console.log('Current uploads directory contents:', files);
-  } catch (err) {
-    console.error('Error reading uploads directory:', err);
-  }
-  
-  // Check if file exists
-  if (!fs.existsSync(filePath)) {
-    console.error('File not found:', {
-      requestedFile,
-      filePath,
-      uploadsDir
-    });
-    return res.status(404).json({ 
-      error: 'File not found',
-      requestedFile,
-      filePath,
-      uploadsDir
-    });
-  }
-
-  // Log file stats
-  try {
-    const stats = fs.statSync(filePath);
-    console.log('File stats:', {
-      size: stats.size,
-      created: stats.birthtime,
-      modified: stats.mtime,
-      permissions: stats.mode
-    });
-  } catch (err) {
-    console.error('Error getting file stats:', err);
-  }
-  
-  next();
-}, express.static(uploadsDir, {
+// Serve uploads with enhanced CORS and security
+app.use('/uploads', express.static(uploadsDir, {
   setHeaders: (res, filePath) => {
     const ext = path.extname(filePath).toLowerCase();
     const mimeTypes = {
@@ -154,26 +132,21 @@ app.use('/uploads', (req, res, next) => {
       res.setHeader('Content-Type', mimeTypes[ext]);
     }
     
-    // Set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // Match the same origin policy as your main CORS config
+    const requestOrigin = res.req.headers.origin;
+    if (allowedOrigins.includes(requestOrigin)) {
+      res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    }
+    res.setHeader('Vary', 'Origin');
+    
+    // Security headers
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    
-    // Set caching headers
-    res.setHeader('Cache-Control', 'public, max-age=31536000');
-    res.setHeader('Expires', new Date(Date.now() + 31536000000).toUTCString());
-    
-    // Set security headers
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    
-    console.log('Set headers for file:', {
-      path: filePath,
-      contentType: mimeTypes[ext],
-      ext: ext
-    });
   }
 }));
 
-// Health check
+// Health check endpoint
 app.get('/api/health', (req, res) => {
   const status = {
     status: 'ok',
@@ -182,7 +155,13 @@ app.get('/api/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     uploadsDir: {
       path: uploadsDir,
-      exists: fs.existsSync(uploadsDir)
+      exists: fs.existsSync(uploadsDir),
+      files: fs.readdirSync(uploadsDir).length
+    },
+    cors: {
+      allowedOrigins,
+      currentOrigin: req.headers.origin,
+      isAllowed: allowedOrigins.includes(req.headers.origin)
     }
   };
   res.json(status);
@@ -194,13 +173,37 @@ app.use('/api/projects', require('./routes/projects'));
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  console.error('Error:', {
+    message: err.message,
+    stack: err.stack,
+    url: req.originalUrl,
+    method: req.method
+  });
+
+  // Handle CORS errors specifically
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Cross-origin request blocked',
+      allowedOrigins
+    });
+  }
+
+  // Handle Multer errors
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ message: 'File too large. Max size 5MB.' });
+      return res.status(413).json({ 
+        status: 'error',
+        message: 'File too large. Max size 5MB.' 
+      });
     }
-    return res.status(400).json({ message: `Multer error: ${err.message}` });
+    return res.status(400).json({ 
+      status: 'error',
+      message: `File upload error: ${err.message}` 
+    });
   }
+
+  // Generic error response
   res.status(500).json({
     status: 'error',
     message: 'Internal server error',
@@ -210,26 +213,42 @@ app.use((err, req, res, next) => {
 
 // 404 handler
 app.use((req, res) => {
-  console.log('404 Not Found:', req.path);
+  console.log('404 Not Found:', req.method, req.originalUrl);
   res.status(404).json({
     status: 'error',
-    message: 'Route not found',
-    path: req.path
+    message: 'Endpoint not found',
+    path: req.path,
+    method: req.method
   });
 });
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`🩺 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`🌐 Allowed origins:`, allowedOrigins);
 }).on('error', (err) => {
+  console.error('Server error:', err);
   if (err.code === 'EADDRINUSE') {
-    console.log(`Port ${PORT} in use. Trying port 5001...`);
-    app.listen(5001, () => {
-      console.log('✅ Server running on port 5001');
-    });
-  } else {
-    console.error('Server error:', err);
+    console.log(`Port ${PORT} in use. Trying port ${Number(PORT)+1}...`);
+    app.listen(Number(PORT)+1);
   }
+});
+
+// Handle shutdown gracefully
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received. Shutting down gracefully...');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received. Shutting down gracefully...');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
 });
