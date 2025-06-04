@@ -17,18 +17,37 @@ if (!fs.existsSync(uploadsDir)) {
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
+    // Get the absolute path to the uploads directory
+    const uploadsDir = path.join(__dirname, '..', 'uploads');
+    
     // Ensure directory exists before saving
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
+      console.log('Created uploads directory at:', uploadsDir);
     }
+    
+    // Log directory contents before saving
+    try {
+      const files = fs.readdirSync(uploadsDir);
+      console.log('Current uploads directory contents:', files);
+    } catch (err) {
+      console.error('Error reading uploads directory:', err);
+    }
+    
     console.log('Saving file to:', uploadsDir);
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
+    // Generate a unique filename with original extension
     const timestamp = Date.now();
-    const ext = path.extname(file.originalname);
-    const filename = `${timestamp}${ext}`;
+    const originalExt = path.extname(file.originalname);
+    const filename = `project-${timestamp}${originalExt}`;
     console.log('Generated filename:', filename);
+    
+    // Log the complete file path that will be used
+    const fullPath = path.join(__dirname, '..', 'uploads', filename);
+    console.log('Full file path will be:', fullPath);
+    
     cb(null, filename);
   }
 });
@@ -63,7 +82,12 @@ router.get('/', async (req, res) => {
 
     // Add full URLs to the projects
     const projectsWithUrls = projects.map(project => {
-      const fullUrl = `${req.protocol}://${req.get('host')}${project.image}`;
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
+      const host = process.env.NODE_ENV === 'production' 
+        ? 'backendchetan.onrender.com'
+        : req.get('host');
+      const fullUrl = `${protocol}://${host}${project.image}`;
+      
       return {
         ...project.toObject(),
         imageUrl: fullUrl
@@ -129,7 +153,7 @@ router.post('/', upload.single('image'), async (req, res) => {
     const image = `/uploads/${req.file.filename}`;
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://chetanbackend.onrender.com' 
+      ? 'https://backendchetan.onrender.com'
       : `${protocol}://${req.get('host')}`;
     const imageUrl = `${baseUrl}${image}`;
     

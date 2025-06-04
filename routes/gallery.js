@@ -17,18 +17,37 @@ if (!fs.existsSync(uploadsDir)) {
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
+    // Get the absolute path to the uploads directory
+    const uploadsDir = path.join(__dirname, '..', 'uploads');
+    
     // Ensure directory exists before saving
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
+      console.log('Created uploads directory at:', uploadsDir);
     }
+    
+    // Log directory contents before saving
+    try {
+      const files = fs.readdirSync(uploadsDir);
+      console.log('Current uploads directory contents:', files);
+    } catch (err) {
+      console.error('Error reading uploads directory:', err);
+    }
+    
     console.log('Saving file to:', uploadsDir);
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
+    // Generate a unique filename with original extension
     const timestamp = Date.now();
-    const ext = path.extname(file.originalname);
-    const filename = `gallery-${timestamp}${ext}`;
+    const originalExt = path.extname(file.originalname);
+    const filename = `gallery-${timestamp}${originalExt}`;
     console.log('Generated filename:', filename);
+    
+    // Log the complete file path that will be used
+    const fullPath = path.join(__dirname, '..', 'uploads', filename);
+    console.log('Full file path will be:', fullPath);
+    
     cb(null, filename);
   }
 });
@@ -63,7 +82,12 @@ router.get('/', async (req, res) => {
 
     // Add full URLs to the items
     const itemsWithUrls = items.map(item => {
-      const fullUrl = `${req.protocol}://${req.get('host')}${item.image}`;
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
+      const host = process.env.NODE_ENV === 'production' 
+        ? 'backendchetan.onrender.com'
+        : req.get('host');
+      const fullUrl = `${protocol}://${host}${item.image}`;
+      
       return {
         ...item.toObject(),
         imageUrl: fullUrl
@@ -77,19 +101,31 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Add new gallery item
-router.post('/', upload.single('image'), async (req, res) => {
-  let uploadedFilePath = null;
+// Add file existence check middleware
+const checkFileExists = (req, res, next) => {
+  if (!req.file) {
+    console.error('No file uploaded');
+    return res.status(400).json({ message: 'No file uploaded' });
+  }
+
+  const filePath = path.join(__dirname, '..', 'uploads', req.file.filename);
+  console.log('Checking if file exists at:', filePath);
   
+  if (!fs.existsSync(filePath)) {
+    console.error('File not found after upload:', filePath);
+    return res.status(500).json({ message: 'File upload failed - file not found after save' });
+  }
+
+  console.log('File exists at:', filePath);
+  next();
+};
+
+// Add new gallery item
+router.post('/', upload.single('image'), checkFileExists, async (req, res) => {
   try {
-    console.log('Received gallery item creation request');
+    console.log('Processing gallery item creation');
     console.log('Request body:', req.body);
     console.log('File details:', req.file);
-
-    if (!req.file) {
-      console.error('No file uploaded');
-      return res.status(400).json({ message: 'Image is required' });
-    }
 
     const { title, description } = req.body;
     
@@ -98,81 +134,31 @@ router.post('/', upload.single('image'), async (req, res) => {
       return res.status(400).json({ message: 'Title is required' });
     }
 
-    // Store the uploaded file path for potential cleanup
-    uploadedFilePath = path.join(uploadsDir, req.file.filename);
-    
-    // Verify file was saved
-    console.log('Checking if file exists at:', uploadedFilePath);
-    if (!fs.existsSync(uploadedFilePath)) {
-      console.error('File was not saved:', uploadedFilePath);
-      return res.status(500).json({ message: 'File upload failed - file not found after save' });
-    }
-    
-    // Verify file is readable
-    try {
-      await fs.promises.access(uploadedFilePath, fs.constants.R_OK);
-      console.log('File is readable:', uploadedFilePath);
-    } catch (err) {
-      console.error('File is not readable:', err);
-      return res.status(500).json({ message: 'File upload failed - file not readable' });
-    }
-
-    // Get file stats
-    const stats = await fs.promises.stat(uploadedFilePath);
-    console.log('File stats:', {
-      size: stats.size,
-      created: stats.birthtime,
-      modified: stats.mtime
-    });
-
     // Construct the image path and URL
     const image = `/uploads/${req.file.filename}`;
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://backendchetan.onrender.com' 
-      : `${protocol}://${req.get('host')}`;
-    const imageUrl = `${baseUrl}${image}`;
+    const protocol = process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
+    const host = process.env.NODE_ENV === 'production' 
+      ? 'backendchetan.onrender.com'
+      : req.get('host');
+    const imageUrl = `${protocol}://${host}${image}`;
     
     console.log('Image path:', image);
-    console.log('Base URL:', baseUrl);
     console.log('Full image URL:', imageUrl);
 
-    // Create gallery item
-    const galleryData = {
+    const galleryItem = new Gallery({
       title,
       description: description || '',
       image,
       imageUrl
-    };
-
-    console.log('Creating gallery item with data:', galleryData);
-
-    const galleryItem = new Gallery(galleryData);
-    console.log('Gallery model created:', galleryItem);
+    });
 
     const savedItem = await galleryItem.save();
     console.log('Gallery item saved successfully:', savedItem);
-    
-    return res.status(201).json(savedItem);
 
+    res.status(201).json(savedItem);
   } catch (err) {
     console.error('Error in gallery item creation:', err);
-
-    // Clean up uploaded file if it exists and there was an error
-    if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-      try {
-        fs.unlinkSync(uploadedFilePath);
-        console.log('Cleaned up uploaded file after error');
-      } catch (cleanupErr) {
-        console.error('Error cleaning up file:', cleanupErr);
-      }
-    }
-
-    return res.status(500).json({ 
-      message: 'Internal server error',
-      error: err.message,
-      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
+    res.status(500).json({ message: err.message });
   }
 });
 

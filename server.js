@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -19,40 +18,39 @@ connectDB().catch(err => {
   process.exit(1);
 });
 
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('Created uploads directory at:', uploadsDir);
+}
+
 // Enable CORS with proper configuration
 app.use(cors({
   origin: [
     'http://localhost:5173',
+    'http://localhost:5137',
     'http://localhost:5000',
-    'https://frontendchetan.vercel.app'
+    'https://frontendchetan.vercel.app',
+    'https://backendchetan.onrender.com',
+    'https://www.chethancinemas.com/'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   credentials: true,
   optionsSuccessStatus: 200
 }));
 
-// Enable pre-flight requests
 app.options('*', cors());
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Ensure uploads directory exists with absolute path
-const uploadsDir = path.join(__dirname, 'uploads');
-console.log('Uploads directory absolute path:', uploadsDir);
-
-// Create uploads directory if it doesn't exist
+// Ensure uploads directory exists
 if (!fs.existsSync(uploadsDir)) {
-  try {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-    console.log('Created uploads directory:', uploadsDir);
-  } catch (err) {
-    console.error('Error creating uploads directory:', err);
-  }
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('Created uploads directory:', uploadsDir);
 } else {
-  console.log('Uploads directory exists at:', uploadsDir);
-  // Log directory contents
+  console.log('Uploads directory exists:', uploadsDir);
   try {
     const files = fs.readdirSync(uploadsDir);
     console.log('Uploads directory contents:', files);
@@ -61,49 +59,88 @@ if (!fs.existsSync(uploadsDir)) {
   }
 }
 
-// Configure multer for file uploads
+// Multer setup
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    // Ensure directory exists before saving
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
     }
-    console.log('Saving file to uploads directory:', uploadsDir);
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const ext = path.extname(file.originalname);
-    const filename = uniqueSuffix + ext;
-    console.log('Generated filename:', filename);
-    cb(null, filename);
+    cb(null, `gallery-${uniqueSuffix}${ext}`);
   }
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|webp/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-
-  if (extname && mimetype) {
-    console.log('File accepted:', file.originalname);
-    return cb(null, true);
+  const allowed = /jpeg|jpg|png|gif|webp/;
+  const ext = allowed.test(path.extname(file.originalname).toLowerCase());
+  const mime = allowed.test(file.mimetype);
+  if (ext && mime) {
+    cb(null, true);
   } else {
-    console.log('File rejected:', file.originalname);
     cb(new Error('Only image files are allowed!'));
   }
 };
 
 const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB
+  storage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }
 });
 
-// Configure static file serving with detailed logging
-app.use('/uploads', express.static(uploadsDir, {
+// Serve uploads with logging
+app.use('/uploads', (req, res, next) => {
+  const requestedFile = req.url;
+  const filePath = path.join(uploadsDir, requestedFile);
+  
+  console.log('Static file request:', {
+    url: requestedFile,
+    fullPath: filePath,
+    exists: fs.existsSync(filePath)
+  });
+
+  // List all files in uploads directory
+  try {
+    const files = fs.readdirSync(uploadsDir);
+    console.log('Current uploads directory contents:', files);
+  } catch (err) {
+    console.error('Error reading uploads directory:', err);
+  }
+  
+  // Check if file exists
+  if (!fs.existsSync(filePath)) {
+    console.error('File not found:', {
+      requestedFile,
+      filePath,
+      uploadsDir
+    });
+    return res.status(404).json({ 
+      error: 'File not found',
+      requestedFile,
+      filePath,
+      uploadsDir
+    });
+  }
+
+  // Log file stats
+  try {
+    const stats = fs.statSync(filePath);
+    console.log('File stats:', {
+      size: stats.size,
+      created: stats.birthtime,
+      modified: stats.mtime,
+      permissions: stats.mode
+    });
+  } catch (err) {
+    console.error('Error getting file stats:', err);
+  }
+  
+  next();
+}, express.static(uploadsDir, {
   setHeaders: (res, filePath) => {
-    // Set proper headers for image serving
     const ext = path.extname(filePath).toLowerCase();
     const mimeTypes = {
       '.jpg': 'image/jpeg',
@@ -112,22 +149,31 @@ app.use('/uploads', express.static(uploadsDir, {
       '.gif': 'image/gif',
       '.webp': 'image/webp'
     };
-
+    
     if (mimeTypes[ext]) {
       res.setHeader('Content-Type', mimeTypes[ext]);
     }
-
+    
     // Set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', 'https://frontendchetan.vercel.app');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+    
+    // Set caching headers
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
+    res.setHeader('Expires', new Date(Date.now() + 31536000000).toUTCString());
+    
+    // Set security headers
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    
+    console.log('Set headers for file:', {
+      path: filePath,
+      contentType: mimeTypes[ext],
+      ext: ext
+    });
   }
 }));
 
-// Health check endpoint
+// Health check
 app.get('/api/health', (req, res) => {
   const status = {
     status: 'ok',
@@ -136,28 +182,25 @@ app.get('/api/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     uploadsDir: {
       path: uploadsDir,
-      exists: fs.existsSync(uploadsDir),
-      isWritable: fs.accessSync(uploadsDir, fs.constants.W_OK) === undefined
+      exists: fs.existsSync(uploadsDir)
     }
   };
   res.json(status);
 });
 
-// Main routes
+// API routes
 app.use('/api/gallery', require('./routes/gallery'));
 app.use('/api/projects', require('./routes/projects'));
 
 // Error handler
 app.use((err, req, res, next) => {
   console.error('Error:', err);
-  
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({ message: 'File too large. Max size 5MB.' });
     }
-    return res.status(400).json({ message: `File upload error: ${err.message}` });
+    return res.status(400).json({ message: `Multer error: ${err.message}` });
   }
-  
   res.status(500).json({
     status: 'error',
     message: 'Internal server error',
@@ -165,7 +208,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler - MUST be last
+// 404 handler
 app.use((req, res) => {
   console.log('404 Not Found:', req.path);
   res.status(404).json({
@@ -175,10 +218,18 @@ app.use((req, res) => {
   });
 });
 
-// Use port 5000 by default
+// Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`Health check available at http://localhost:${PORT}/api/health`);
-  console.log(`API endpoints available at http://localhost:${PORT}/api/*`);
+  console.log(`🩺 Health check: http://localhost:${PORT}/api/health`);
+}).on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`Port ${PORT} in use. Trying port 5001...`);
+    app.listen(5001, () => {
+      console.log('✅ Server running on port 5001');
+    });
+  } else {
+    console.error('Server error:', err);
+  }
 });
