@@ -26,14 +26,6 @@ const storage = multer.diskStorage({
       console.log('Created uploads directory at:', uploadsDir);
     }
     
-    // Log directory contents before saving
-    try {
-      const files = fs.readdirSync(uploadsDir);
-      console.log('Current uploads directory contents:', files);
-    } catch (err) {
-      console.error('Error reading uploads directory:', err);
-    }
-    
     console.log('Saving file to:', uploadsDir);
     cb(null, uploadsDir);
   },
@@ -41,7 +33,7 @@ const storage = multer.diskStorage({
     // Generate a unique filename with original extension
     const timestamp = Date.now();
     const originalExt = path.extname(file.originalname);
-    const filename = `project-${timestamp}${originalExt}`;
+    const filename = `${timestamp}${originalExt}`;
     console.log('Generated filename:', filename);
     
     // Log the complete file path that will be used
@@ -73,6 +65,15 @@ const upload = multer({
   }
 });
 
+// Helper function to generate full image URL
+const getImageUrl = (req, imagePath) => {
+  const protocol = process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
+  const host = process.env.NODE_ENV === 'production' 
+    ? 'backendchetan.onrender.com'
+    : req.get('host');
+  return `${protocol}://${host}${imagePath}`;
+};
+
 // Get all projects
 router.get('/', async (req, res) => {
   try {
@@ -81,18 +82,10 @@ router.get('/', async (req, res) => {
     console.log(`Found ${projects.length} projects`);
 
     // Add full URLs to the projects
-    const projectsWithUrls = projects.map(project => {
-      const protocol = process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
-      const host = process.env.NODE_ENV === 'production' 
-        ? 'backendchetan.onrender.com'
-        : req.get('host');
-      const fullUrl = `${protocol}://${host}${project.image}`;
-      
-      return {
-        ...project.toObject(),
-        imageUrl: fullUrl
-      };
-    });
+    const projectsWithUrls = projects.map(project => ({
+      ...project.toObject(),
+      imageUrl: getImageUrl(req, project.image)
+    }));
 
     res.json(projectsWithUrls);
   } catch (err) {
@@ -149,24 +142,14 @@ router.post('/', upload.single('image'), async (req, res) => {
       modified: stats.mtime
     });
 
-    // Construct the image path and URL
+    // Store only the relative path
     const image = `/uploads/${req.file.filename}`;
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://backendchetan.onrender.com'
-      : `${protocol}://${req.get('host')}`;
-    const imageUrl = `${baseUrl}${image}`;
-    
-    console.log('Image path:', image);
-    console.log('Base URL:', baseUrl);
-    console.log('Full image URL:', imageUrl);
 
     // Create project with all required fields
     const projectData = {
       title,
       description: description || '',
       image,
-      imageUrl,
       category: category || '',
       section: section || 'Banner',
       completed: completed === 'true',
@@ -181,7 +164,13 @@ router.post('/', upload.single('image'), async (req, res) => {
     const savedProject = await project.save();
     console.log('Project saved successfully:', savedProject);
     
-    return res.status(201).json(savedProject);
+    // Add the full URL for the response
+    const projectWithUrl = {
+      ...savedProject.toObject(),
+      imageUrl: getImageUrl(req, savedProject.image)
+    };
+    
+    return res.status(201).json(projectWithUrl);
 
   } catch (err) {
     console.error('Error in project creation:', err);
@@ -265,13 +254,12 @@ router.put('/:id', upload.single('image'), async (req, res) => {
     );
 
     // Return the full item data including the complete image URL
-    const fullItem = {
+    const projectWithUrl = {
       ...updatedProject.toObject(),
-      imageUrl: `${req.protocol}://${req.get('host')}${updatedProject.image}`
+      imageUrl: getImageUrl(req, updatedProject.image)
     };
 
-    console.log('Project updated successfully:', fullItem);
-    res.json(fullItem);
+    res.json(projectWithUrl);
   } catch (err) {
     console.error('Error updating project:', err);
     res.status(500).json({ message: err.message });

@@ -23,16 +23,6 @@ const projectSchema = new mongoose.Schema({
       message: 'Image path must start with /uploads/'
     }
   },
-  imageUrl: {
-    type: String,
-    required: [true, 'Image URL is required'],
-    validate: {
-      validator: function(v) {
-        return v.startsWith('http://') || v.startsWith('https://');
-      },
-      message: 'Image URL must be a valid HTTP/HTTPS URL'
-    }
-  },
   category: {
     type: String,
     trim: true,

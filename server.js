@@ -30,8 +30,11 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5137',
   'http://localhost:5000',
+  'http://localhost:5150',
+  'http://127.0.0.1:5150',
+  'http://127.0.0.1:5173',
   'https://frontendchetan.vercel.app',
-  'https://www.chethancinemas.com' // No trailing slash
+  'https://www.chethancinemas.com'
 ];
 
 // Enhanced CORS configuration
@@ -48,14 +51,19 @@ const corsOptions = {
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token', 'Accept', 'Origin', 'X-Requested-With'],
+  exposedHeaders: ['Content-Type', 'Authorization', 'x-auth-token'],
   credentials: true,
   optionsSuccessStatus: 200,
+  preflightContinue: false,
   maxAge: 86400 // 24 hours
 };
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
+
+// Handle preflight requests explicitly
+app.options('*', cors(corsOptions));
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -67,9 +75,6 @@ app.use((req, res, next) => {
   });
   next();
 });
-
-// Explicit OPTIONS handler for preflight requests
-app.options('*', cors(corsOptions));
 
 // Body parsers
 app.use(express.json({ limit: '10mb' }));
@@ -83,6 +88,35 @@ app.use((req, res, next) => {
   res.header('Referrer-Policy', 'same-origin');
   next();
 });
+
+// Serve static files from uploads directory - IMPORTANT: This must come before API routes
+app.use('/uploads', express.static(uploadsDir, {
+  setHeaders: (res, filePath) => {
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp'
+    };
+    
+    if (mimeTypes[ext]) {
+      res.setHeader('Content-Type', mimeTypes[ext]);
+    }
+    
+    // Match the same origin policy as your main CORS config
+    const requestOrigin = res.req.headers.origin;
+    if (allowedOrigins.includes(requestOrigin)) {
+      res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    }
+    res.setHeader('Vary', 'Origin');
+    
+    // Security headers
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  }
+}));
 
 // Multer setup for file uploads
 const storage = multer.diskStorage({
@@ -116,60 +150,32 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB
 });
 
-// Serve uploads with enhanced CORS and security
-app.use('/uploads', express.static(uploadsDir, {
-  setHeaders: (res, filePath) => {
-    const ext = path.extname(filePath).toLowerCase();
-    const mimeTypes = {
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp'
-    };
-    
-    if (mimeTypes[ext]) {
-      res.setHeader('Content-Type', mimeTypes[ext]);
-    }
-    
-    // Match the same origin policy as your main CORS config
-    const requestOrigin = res.req.headers.origin;
-    if (allowedOrigins.includes(requestOrigin)) {
-      res.setHeader('Access-Control-Allow-Origin', requestOrigin);
-    }
-    res.setHeader('Vary', 'Origin');
-    
-    // Security headers
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-  }
-}));
-
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  const status = {
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    environment: process.env.NODE_ENV || 'development',
-    uploadsDir: {
-      path: uploadsDir,
-      exists: fs.existsSync(uploadsDir),
-      files: fs.readdirSync(uploadsDir).length
-    },
-    cors: {
-      allowedOrigins,
-      currentOrigin: req.headers.origin,
-      isAllowed: allowedOrigins.includes(req.headers.origin)
-    }
-  };
-  res.json(status);
-});
-
 // API routes
 app.use('/api/gallery', require('./routes/gallery'));
 app.use('/api/projects', require('./routes/projects'));
+
+// Debug middleware for 404s
+app.use((req, res, next) => {
+  console.log('404 Not Found:', {
+    method: req.method,
+    path: req.path,
+    url: req.url,
+    baseUrl: req.baseUrl,
+    originalUrl: req.originalUrl,
+    exists: fs.existsSync(path.join(uploadsDir, path.basename(req.path)))
+  });
+  next();
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    status: 'error',
+    message: 'Endpoint not found',
+    path: req.path,
+    method: req.method
+  });
+});
 
 // Error handler
 app.use((err, req, res, next) => {
@@ -211,28 +217,17 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
-app.use((req, res) => {
-  console.log('404 Not Found:', req.method, req.originalUrl);
-  res.status(404).json({
-    status: 'error',
-    message: 'Endpoint not found',
-    path: req.path,
-    method: req.method
-  });
-});
-
 // Start server
 const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🩺 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`🌐 Allowed origins:`, allowedOrigins);
-}).on('error', (err) => {
-  console.error('Server error:', err);
-  if (err.code === 'EADDRINUSE') {
-    console.log(`Port ${PORT} in use. Trying port ${Number(PORT)+1}...`);
-    app.listen(Number(PORT)+1);
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  console.log('Uploads directory:', uploadsDir);
+  // List files in uploads directory
+  try {
+    const files = fs.readdirSync(uploadsDir);
+    console.log('Files in uploads directory:', files);
+  } catch (err) {
+    console.error('Error reading uploads directory:', err);
   }
 });
 
