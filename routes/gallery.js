@@ -23,12 +23,9 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
-    // Get the title from the request body
-    const title = req.body.title || 'untitled';
-    // Create a URL-friendly version of the title
-    const safeTitle = title.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const timestamp = Date.now();
     const ext = path.extname(file.originalname);
-    cb(null, `project-${safeTitle}${ext}`);
+    cb(null, `${timestamp}${ext}`);
   }
 });
 
@@ -116,13 +113,13 @@ router.post('/', auth, upload.single('image'), async (req, res) => {
       });
     }
 
-    const { title, description } = req.body;
+    const { title, description, category, section, year } = req.body;
 
     // Save only the relative path
     const imagePath = `/uploads/${req.file.filename}`;
 
     // Generate the full URL
-    const baseUrl = 'https://www.chethancinemas.com';
+    const baseUrl = 'http://www.chethancinemas.com';
     const imageUrl = `${baseUrl}${imagePath}`;
 
     // Verify the file was saved
@@ -138,7 +135,10 @@ router.post('/', auth, upload.single('image'), async (req, res) => {
       title,
       description,
       image: imagePath,
-      imageUrl: imageUrl
+      imageUrl,
+      category: category || 'Regular',
+      section: section || 'Regular',
+      year: year || new Date().getFullYear().toString()
     });
 
     const savedItem = await newGalleryItem.save();
