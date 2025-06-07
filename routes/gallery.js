@@ -123,7 +123,7 @@ const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const auth = require('../middleware/auth');
 const sanitize = require('../middleware/sanitize');
 // routes/gallery.js
-const sanitize = require('../middleware/sanitize');
+// const sanitize = require('../middleware/sanitize');
 
 // Configure Cloudinary
 cloudinary.config({
