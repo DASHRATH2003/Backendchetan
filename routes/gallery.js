@@ -135,13 +135,21 @@ router.post('/', auth, upload.single('image'), async (req, res) => {
       title,
       description,
       image: imagePath,
-      imageUrl,
+      imageUrl: imageUrl,
       category: category || 'Regular',
       section: section || 'Regular',
       year: year || new Date().getFullYear().toString()
     });
 
     const savedItem = await newGalleryItem.save();
+
+    // Log the saved item for debugging
+    console.log('Saved gallery item:', {
+      id: savedItem._id,
+      title: savedItem.title,
+      image: savedItem.image,
+      imageUrl: savedItem.imageUrl
+    });
 
     res.status(201).json({
       success: true,
