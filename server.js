@@ -33,8 +33,8 @@ const allowedOrigins = [
   'http://localhost:5150',
   'http://127.0.0.1:5150',
   'http://127.0.0.1:5173',
-  'https://frontendchetan.vercel.app',
-  'https://www.chethancinemas.com'
+  'https://www.chethancinemas.com',
+  'https://chethancinemas.com'
 ];
 
 // Enhanced CORS configuration
@@ -43,7 +43,7 @@ const corsOptions = {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
       callback(null, true);
     } else {
       console.error('CORS blocked for origin:', origin);
@@ -51,12 +51,9 @@ const corsOptions = {
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token', 'Accept', 'Origin', 'X-Requested-With'],
-  exposedHeaders: ['Content-Type', 'Authorization', 'x-auth-token'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token', 'Accept'],
   credentials: true,
-  optionsSuccessStatus: 200,
-  preflightContinue: false,
-  maxAge: 86400 // 24 hours
+  optionsSuccessStatus: 200
 };
 
 // Apply CORS middleware
