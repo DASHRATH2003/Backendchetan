@@ -116,6 +116,28 @@ app.use('/uploads', express.static(uploadsDir, {
   }
 }));
 
+// Root route handler
+app.get('/', (req, res) => {
+  res.json({
+    status: 'success',
+    message: 'Backend server is running',
+    endpoints: {
+      gallery: '/api/gallery',
+      uploads: '/uploads/*',
+      projects: '/api/projects'
+    }
+  });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'success',
+    message: 'Server is healthy',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Multer setup for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
