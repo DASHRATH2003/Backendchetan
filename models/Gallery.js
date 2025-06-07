@@ -14,7 +14,24 @@ const gallerySchema = new mongoose.Schema({
     required: [true, 'Image path is required']
   },
   imageUrl: {
-    type: String
+    type: String,
+    required: [true, 'Image URL is required']
+  },
+  category: {
+    type: String,
+    default: 'Regular'
+  },
+  section: {
+    type: String,
+    default: 'Regular'
+  },
+  completed: {
+    type: Boolean,
+    default: false
+  },
+  year: {
+    type: String,
+    default: new Date().getFullYear().toString()
   }
 }, {
   timestamps: true

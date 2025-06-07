@@ -23,9 +23,12 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    // Get the title from the request body
+    const title = req.body.title || 'untitled';
+    // Create a URL-friendly version of the title
+    const safeTitle = title.toLowerCase().replace(/[^a-z0-9]/g, '-');
     const ext = path.extname(file.originalname);
-    cb(null, `gallery-${uniqueSuffix}${ext}`);
+    cb(null, `project-${safeTitle}${ext}`);
   }
 });
 
@@ -118,6 +121,10 @@ router.post('/', auth, upload.single('image'), async (req, res) => {
     // Save only the relative path
     const imagePath = `/uploads/${req.file.filename}`;
 
+    // Generate the full URL
+    const baseUrl = 'https://www.chethancinemas.com';
+    const imageUrl = `${baseUrl}${imagePath}`;
+
     // Verify the file was saved
     const fullPath = path.join(__dirname, '..', imagePath);
     if (!verifyFile(fullPath)) {
@@ -130,25 +137,16 @@ router.post('/', auth, upload.single('image'), async (req, res) => {
     const newGalleryItem = new Gallery({
       title,
       description,
-      image: imagePath
+      image: imagePath,
+      imageUrl: imageUrl
     });
 
     const savedItem = await newGalleryItem.save();
 
-    // Add the full URL to the saved item using production URL
-    const baseUrl = getProductionUrl(req);
-    const imageUrl = `${baseUrl}${savedItem.image}`;
-
-    // Convert to a plain object and add the URL
-    const itemWithUrl = {
-      ...savedItem.toObject(),
-      imageUrl
-    };
-
     res.status(201).json({
       success: true,
       message: 'Image uploaded successfully',
-      data: itemWithUrl
+      data: savedItem
     });
   } catch (error) {
     console.error('Upload error:', error);
