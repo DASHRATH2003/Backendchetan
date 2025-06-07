@@ -114,6 +114,8 @@
 // module.exports = router;
 
 
+// 
+
 const express = require('express');
 const router = express.Router();
 const Gallery = require('../models/Gallery');
@@ -122,10 +124,13 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const auth = require('../middleware/auth');
 const sanitize = require('../middleware/sanitize');
-// routes/gallery.js
-// const sanitize = require('../middleware/sanitize');
 
 // Configure Cloudinary
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.error('Missing Cloudinary configuration!');
+  process.exit(1);
+}
+
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -192,10 +197,11 @@ router.get('/', async (req, res) => {
     }
 
     const options = {
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page: Math.max(1, parseInt(page)) || 1,
+      limit: Math.min(100, Math.max(1, parseInt(limit))) || 20,
       sort: { createdAt: -1 },
-      lean: true
+      lean: true,
+      allowDiskUse: true
     };
 
     const result = await Gallery.paginate(query, options);
@@ -208,10 +214,16 @@ router.get('/', async (req, res) => {
       page: result.page
     });
   } catch (error) {
-    console.error('Error fetching gallery:', error);
+    console.error('Error fetching gallery:', {
+      error: error.message,
+      stack: error.stack,
+      query: req.query
+    });
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching gallery items'
+      message: process.env.NODE_ENV === 'development' 
+        ? error.message 
+        : 'Server error while fetching gallery items'
     });
   }
 });
@@ -234,10 +246,14 @@ router.post(
         });
       }
 
-      // Create new gallery item with Cloudinary details
+      // Validate required fields
+      if (!title || !req.file.path || !req.file.filename) {
+        throw new Error('Missing required fields');
+      }
+
       const newGalleryItem = new Gallery({
-        title,
-        description,
+        title: title.trim(),
+        description: description ? description.trim() : '',
         cloudinaryUrl: req.file.path,
         cloudinaryPublicId: req.file.filename,
         category: category || 'Regular',
@@ -254,12 +270,16 @@ router.post(
       res.status(201).json({
         success: true,
         message: 'Image uploaded successfully',
-        data: savedItem
+        data: savedItem.toObject()
       });
     } catch (error) {
-      console.error('Upload error:', error);
+      console.error('Upload error:', {
+        error: error.message,
+        stack: error.stack,
+        body: req.body
+      });
       
-      // If MongoDB save failed, delete the uploaded image from Cloudinary
+      // Clean up Cloudinary upload if MongoDB save failed
       if (req.file && req.file.filename) {
         try {
           await cloudinary.uploader.destroy(req.file.filename);
@@ -270,7 +290,9 @@ router.post(
 
       res.status(500).json({
         success: false,
-        message: error.message || 'Failed to save gallery item'
+        message: process.env.NODE_ENV === 'development'
+          ? error.message
+          : 'Failed to save gallery item'
       });
     }
   }
@@ -281,16 +303,29 @@ router.put('/:id', auth, sanitize, async (req, res) => {
   try {
     const { title, description, category, section, year } = req.body;
     
+    const updates = {
+      ...(title && { title: title.trim() }),
+      ...(description && { description: description.trim() }),
+      ...(category && { category }),
+      ...(section && { section }),
+      ...(year && { year })
+    };
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid fields provided for update'
+      });
+    }
+
     const updatedItem = await Gallery.findByIdAndUpdate(
       req.params.id,
-      {
-        title,
-        description,
-        category,
-        section,
-        year
-      },
-      { new: true, runValidators: true }
+      updates,
+      { 
+        new: true, 
+        runValidators: true,
+        lean: true 
+      }
     );
 
     if (!updatedItem) {
@@ -306,10 +341,17 @@ router.put('/:id', auth, sanitize, async (req, res) => {
       data: updatedItem
     });
   } catch (error) {
-    console.error('Update error:', error);
+    console.error('Update error:', {
+      error: error.message,
+      stack: error.stack,
+      params: req.params,
+      body: req.body
+    });
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to update gallery item'
+      message: process.env.NODE_ENV === 'development'
+        ? error.message
+        : 'Failed to update gallery item'
     });
   }
 });
@@ -317,7 +359,7 @@ router.put('/:id', auth, sanitize, async (req, res) => {
 // Delete gallery item
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const item = await Gallery.findById(req.params.id);
+    const item = await Gallery.findById(req.params.id).lean();
     
     if (!item) {
       return res.status(404).json({
@@ -328,24 +370,33 @@ router.delete('/:id', auth, async (req, res) => {
 
     // First delete from Cloudinary
     try {
-      await cloudinary.uploader.destroy(item.cloudinaryPublicId);
+      await cloudinary.uploader.destroy(item.cloudinaryPublicId, {
+        resource_type: 'image',
+        invalidate: true
+      });
     } catch (cloudinaryErr) {
       console.error('Cloudinary deletion error:', cloudinaryErr);
       // Continue with MongoDB deletion even if Cloudinary fails
     }
 
     // Then delete from MongoDB
-    await item.deleteOne();
+    await Gallery.deleteOne({ _id: req.params.id });
 
     res.json({
       success: true,
       message: 'Gallery item deleted successfully'
     });
   } catch (error) {
-    console.error('Deletion error:', error);
+    console.error('Deletion error:', {
+      error: error.message,
+      stack: error.stack,
+      params: req.params
+    });
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to delete gallery item'
+      message: process.env.NODE_ENV === 'development'
+        ? error.message
+        : 'Failed to delete gallery item'
     });
   }
 });
