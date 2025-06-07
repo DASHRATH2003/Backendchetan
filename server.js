@@ -34,7 +34,8 @@ const allowedOrigins = [
   'http://127.0.0.1:5150',
   'http://127.0.0.1:5173',
   'https://www.chethancinemas.com',
-  'https://chethancinemas.com'
+  'https://chethancinemas.com',
+  'https://backendchetan.onrender.com'
 ];
 
 // Enhanced CORS configuration

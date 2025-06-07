@@ -59,7 +59,7 @@ const verifyFile = (filePath) => {
 // Helper function to get production URL
 const getProductionUrl = (req) => {
   if (process.env.NODE_ENV === 'production') {
-    return 'https://www.chethancinemas.com';
+    return 'https://backendchetan.onrender.com';
   }
   return `${req.protocol}://${req.get('host')}`;
 };
