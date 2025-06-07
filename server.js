@@ -199,48 +199,19 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error('Error:', {
-    message: err.message,
-    stack: err.stack,
-    url: req.originalUrl,
-    method: req.method
-  });
-
-  // Handle CORS errors specifically
-  if (err.message === 'Not allowed by CORS') {
-    return res.status(403).json({
-      status: 'error',
-      message: 'Cross-origin request blocked',
-      allowedOrigins
-    });
-  }
-
-  // Handle Multer errors
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ 
-        status: 'error',
-        message: 'File too large. Max size 5MB.' 
-      });
-    }
-    return res.status(400).json({ 
-      status: 'error',
-      message: `File upload error: ${err.message}` 
-    });
-  }
-
-  // Generic error response
-  res.status(500).json({
+  console.error('Error:', err);
+  res.status(err.status || 500).json({
     status: 'error',
-    message: 'Internal server error',
-    details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    message: err.message || 'Internal server error'
   });
 });
 
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
+  console.log('Environment:', process.env.NODE_ENV || 'development');
+  console.log('MongoDB URI:', process.env.MONGODB_URI ? 'Set' : 'Not set');
   console.log('Uploads directory:', uploadsDir);
   // List files in uploads directory
   try {
