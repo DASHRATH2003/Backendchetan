@@ -56,6 +56,14 @@ const verifyFile = (filePath) => {
   }
 };
 
+// Helper function to get production URL
+const getProductionUrl = (req) => {
+  if (process.env.NODE_ENV === 'production') {
+    return 'https://www.chetansinemas.com';
+  }
+  return `${req.protocol}://${req.get('host')}`;
+};
+
 // Get all gallery items
 router.get('/', async (req, res) => {
   try {
@@ -70,10 +78,9 @@ router.get('/', async (req, res) => {
         console.warn(`Image file not found: ${fullPath}`);
       }
 
-      // Add the full URL to each item
-      const protocol = req.protocol;
-      const host = req.get('host');
-      const imageUrl = `${protocol}://${host}${item.image}`;
+      // Add the full URL to each item using production URL
+      const baseUrl = getProductionUrl(req);
+      const imageUrl = `${baseUrl}${item.image}`;
 
       return {
         ...item.toObject(),
@@ -128,10 +135,9 @@ router.post('/', auth, upload.single('image'), async (req, res) => {
 
     const savedItem = await newGalleryItem.save();
 
-    // Add the full URL to the saved item
-    const protocol = req.protocol;
-    const host = req.get('host');
-    const imageUrl = `${protocol}://${host}${savedItem.image}`;
+    // Add the full URL to the saved item using production URL
+    const baseUrl = getProductionUrl(req);
+    const imageUrl = `${baseUrl}${savedItem.image}`;
 
     // Convert to a plain object and add the URL
     const itemWithUrl = {
