@@ -1,11 +1,9 @@
 const express = require('express');
 const cors = require('cors');
-const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const connectDB = require('./db');
 require('dotenv').config();
-const mongoose = require('mongoose');
 
 const app = express();
 
@@ -52,9 +50,15 @@ const corsOptions = {
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token', 'Accept'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'x-auth-token', 
+    'Accept'
+  ],
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
+  exposedHeaders: ['x-auth-token']
 };
 
 // Apply CORS middleware
@@ -87,9 +91,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve static files from uploads directory - IMPORTANT: This must come before API routes
-app.use('/uploads', express.static(uploadsDir, {
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   setHeaders: (res, filePath) => {
+    // Set proper content type for images
     const ext = path.extname(filePath).toLowerCase();
     const mimeTypes = {
       '.jpg': 'image/jpeg',
@@ -103,14 +108,8 @@ app.use('/uploads', express.static(uploadsDir, {
       res.setHeader('Content-Type', mimeTypes[ext]);
     }
     
-    // Match the same origin policy as your main CORS config
-    const requestOrigin = res.req.headers.origin;
-    if (allowedOrigins.includes(requestOrigin)) {
-      res.setHeader('Access-Control-Allow-Origin', requestOrigin);
-    }
-    res.setHeader('Vary', 'Origin');
-    
-    // Security headers
+    // Set CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   }
@@ -138,54 +137,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Multer setup for file uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, `gallery-${uniqueSuffix}${ext}`);
-  }
-});
-
-const fileFilter = (req, file, cb) => {
-  const allowed = /jpeg|jpg|png|gif|webp/;
-  const ext = allowed.test(path.extname(file.originalname).toLowerCase());
-  const mime = allowed.test(file.mimetype);
-  if (ext && mime) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only image files are allowed!'));
-  }
-};
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB
-});
-
 // API routes
 app.use('/api/gallery', require('./routes/gallery'));
 app.use('/api/projects', require('./routes/projects'));
-
-// Debug middleware for 404s
-app.use((req, res, next) => {
-  console.log('404 Not Found:', {
-    method: req.method,
-    path: req.path,
-    url: req.url,
-    baseUrl: req.baseUrl,
-    originalUrl: req.originalUrl,
-    exists: fs.existsSync(path.join(uploadsDir, path.basename(req.path)))
-  });
-  next();
-});
 
 // 404 handler
 app.use((req, res) => {
@@ -208,18 +162,11 @@ app.use((err, req, res, next) => {
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log('Environment:', process.env.NODE_ENV || 'development');
   console.log('MongoDB URI:', process.env.MONGODB_URI ? 'Set' : 'Not set');
   console.log('Uploads directory:', uploadsDir);
-  // List files in uploads directory
-  try {
-    const files = fs.readdirSync(uploadsDir);
-    console.log('Files in uploads directory:', files);
-  } catch (err) {
-    console.error('Error reading uploads directory:', err);
-  }
 });
 
 // Handle shutdown gracefully

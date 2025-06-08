@@ -1,403 +1,303 @@
-// const express = require('express');
-// const router = express.Router();
-// const Gallery = require('../models/Gallery');
-// const multer = require('multer');
-// const cloudinary = require('cloudinary').v2;
-// const { CloudinaryStorage } = require('multer-storage-cloudinary');
-// const auth = require('../middleware/auth');
-
-// // Cloudinary Config
-// cloudinary.config({
-//   cloud_name: 'Root',
-//   api_key: '454217581167662',
-//   api_secret: 'MahFoEMfadEXCVMfKS0xgcxF1z8'
-// });
-
-// // Cloudinary Storage
-// const storage = new CloudinaryStorage({
-//   cloudinary: cloudinary,
-//   params: {
-//     folder: 'gallery',
-//     allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
-//     format: 'jpg',
-//     transformation: [{ quality: 'auto' }],
-//     public_id: (req, file) => {
-//       const timestamp = Date.now();
-//       return `project-${timestamp}`;
-//     },
-//   },
-// });
-
-// const upload = multer({ storage });
-
-// // Get all gallery items
-// router.get('/', async (req, res) => {
-//   try {
-//     const gallery = await Gallery.find().sort({ createdAt: -1 });
-//     res.json({ success: true, data: gallery });
-//   } catch (error) {
-//     res.status(500).json({ success: false, message: error.message });
-//   }
-// });
-
-// // Upload new image to Cloudinary
-// router.post('/', auth, upload.single('image'), async (req, res) => {
-//   try {
-//     const { title, description, category, section, year } = req.body;
-
-//     if (!req.file) {
-//       return res.status(400).json({ success: false, message: 'Image upload failed' });
-//     }
-
-//     // Get the timestamp and create URLs
-//     const timestamp = Date.now();
-//     const imagePath = `/uploads/project-${timestamp}.jpg`;
-//     const imageUrl = `http://www.chethancinemas.com${imagePath}`;
-
-//     const newGalleryItem = new Gallery({
-//       title,
-//       description,
-//       image: req.file.path, // Use Cloudinary URL for image field
-//       imageUrl: imageUrl, // Keep the chethancinemas.com URL format
-//       cloudinaryUrl: req.file.path, // Store Cloudinary URL
-//       category: category || 'Regular',
-//       section: section || 'Regular',
-//       completed: false,
-//       year: year || new Date().getFullYear().toString(),
-//     });
-
-//     const savedItem = await newGalleryItem.save();
-//     console.log('Saved gallery item:', savedItem);
-//     res.status(201).json({ success: true, message: 'Image uploaded', data: savedItem });
-
-//   } catch (error) {
-//     console.error('Upload error:', error);
-//     res.status(500).json({ success: false, message: error.message });
-//   }
-// });
-
-// // Delete one
-// router.delete('/:id', auth, async (req, res) => {
-//   try {
-//     const item = await Gallery.findById(req.params.id);
-//     if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
-
-//     if (item.cloudinaryUrl) {
-//       const publicId = `gallery/${item.cloudinaryUrl.split('/').pop().split('.')[0]}`;
-//       await cloudinary.uploader.destroy(publicId);
-//     }
-
-//     await item.deleteOne();
-//     res.json({ success: true, message: 'Item deleted' });
-//   } catch (error) {
-//     res.status(500).json({ success: false, message: error.message });
-//   }
-// });
-
-// // Delete all
-// router.delete('/all', auth, async (req, res) => {
-//   try {
-//     const all = await Gallery.find();
-//     for (const item of all) {
-//       if (item.cloudinaryUrl) {
-//         const publicId = `gallery/${item.cloudinaryUrl.split('/').pop().split('.')[0]}`;
-//         await cloudinary.uploader.destroy(publicId);
-//       }
-//     }
-//     await Gallery.deleteMany();
-//     res.json({ success: true, message: 'All items deleted' });
-//   } catch (error) {
-//     res.status(500).json({ success: false, message: error.message });
-//   }
-// });
-
-// module.exports = router;
-
-
-// 
-
+// routes/gallery.js
 const express = require('express');
 const router = express.Router();
-const Gallery = require('../models/Gallery');
 const multer = require('multer');
-const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const path = require('path');
+const fs = require('fs');
+const Gallery = require('../models/Gallery');
 const auth = require('../middleware/auth');
-const sanitize = require('../middleware/sanitize');
+const { validateGalleryItem } = require('../middleware/validation');
+const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
 
-// Configure Cloudinary
-if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-  console.error('Missing Cloudinary configuration!');
-  process.exit(1);
-}
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-  secure: true
-});
-
-// Cloudinary storage configuration
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: async (req, file) => {
-    return {
-      folder: 'chetan-cinemas/gallery',
-      allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
-      transformation: [
-        { width: 1920, height: 1080, crop: 'limit', quality: 'auto' }
-      ],
-      public_id: `gallery-${Date.now()}`,
-      resource_type: 'auto'
-    };
-  }
-});
-
+// Configure multer for memory storage
+const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
-    if (!file.mimetype.match(/^image\/(jpeg|jpg|png|gif|webp)$/)) {
-      return cb(new Error('Only image files are allowed!'), false);
+    console.log('Processing file upload:', file.originalname);
+    const allowedTypes = /jpeg|jpg|png|gif|webp/i;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (extname && mimetype) {
+      console.log('File accepted:', file.originalname, 'Mimetype:', file.mimetype);
+      return cb(null, true);
+    } else {
+      console.log('File rejected:', file.originalname, 'Mimetype:', file.mimetype);
+      cb(new Error('Only image files (jpg, jpeg, png, gif, webp) are allowed!'));
     }
-    cb(null, true);
+  },
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB
   }
 });
 
-// Error handling middleware for multer
-const handleUploadErrors = (err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    return res.status(400).json({
-      success: false,
-      message: err.code === 'LIMIT_FILE_SIZE' 
-        ? 'File size too large. Max 5MB allowed.' 
-        : 'File upload error'
-    });
-  } else if (err) {
-    return res.status(400).json({
-      success: false,
-      message: err.message || 'File upload failed'
-    });
-  }
-  next();
-};
-
-// Get all gallery items with pagination and filtering
+// Get all gallery items with pagination
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 20, category, section, year, search } = req.query;
-    
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    // Build query based on filters
     const query = {};
-    if (category) query.category = category;
-    if (section) query.section = section;
-    if (year) query.year = year;
-    if (search) {
-      query.$text = { $search: search };
+    if (req.query.category) query.category = req.query.category;
+    if (req.query.section) query.section = req.query.section;
+    if (req.query.year) query.year = req.query.year;
+    if (req.query.search) {
+      query.$or = [
+        { title: { $regex: req.query.search, $options: 'i' } },
+        { description: { $regex: req.query.search, $options: 'i' } }
+      ];
     }
 
-    const options = {
-      page: Math.max(1, parseInt(page)) || 1,
-      limit: Math.min(100, Math.max(1, parseInt(limit))) || 20,
-      sort: { createdAt: -1 },
-      lean: true,
-      allowDiskUse: true
-    };
+    const [items, total] = await Promise.all([
+      Gallery.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Gallery.countDocuments(query)
+    ]);
 
-    const result = await Gallery.paginate(query, options);
+    const pages = Math.ceil(total / limit);
 
     res.json({
       success: true,
-      data: result.docs,
-      total: result.totalDocs,
-      pages: result.totalPages,
-      page: result.page
+      data: items,
+      page,
+      limit,
+      total,
+      pages
     });
-  } catch (error) {
-    console.error('Error fetching gallery:', {
-      error: error.message,
-      stack: error.stack,
-      query: req.query
-    });
+  } catch (err) {
+    console.error('Error fetching gallery:', err);
     res.status(500).json({
       success: false,
-      message: process.env.NODE_ENV === 'development' 
-        ? error.message 
-        : 'Server error while fetching gallery items'
+      message: 'Server error while fetching gallery'
     });
   }
 });
 
-// Upload new image to Cloudinary and save to MongoDB
-router.post(
-  '/',
-  auth,
-  sanitize,
-  upload.single('image'),
-  handleUploadErrors,
-  async (req, res) => {
-    try {
-      const { title, description, category, section, year } = req.body;
-
-      if (!req.file) {
-        return res.status(400).json({
-          success: false,
-          message: 'No file uploaded or upload failed'
-        });
-      }
-
-      // Validate required fields
-      if (!title || !req.file.path || !req.file.filename) {
-        throw new Error('Missing required fields');
-      }
-
-      const newGalleryItem = new Gallery({
-        title: title.trim(),
-        description: description ? description.trim() : '',
-        cloudinaryUrl: req.file.path,
-        cloudinaryPublicId: req.file.filename,
-        category: category || 'Regular',
-        section: section || 'Regular',
-        year: year || new Date().getFullYear().toString(),
-        format: req.file.format,
-        width: req.file.width,
-        height: req.file.height,
-        bytes: req.file.size
-      });
-
-      const savedItem = await newGalleryItem.save();
-
-      res.status(201).json({
-        success: true,
-        message: 'Image uploaded successfully',
-        data: savedItem.toObject()
-      });
-    } catch (error) {
-      console.error('Upload error:', {
-        error: error.message,
-        stack: error.stack,
-        body: req.body
-      });
-      
-      // Clean up Cloudinary upload if MongoDB save failed
-      if (req.file && req.file.filename) {
-        try {
-          await cloudinary.uploader.destroy(req.file.filename);
-        } catch (cloudinaryErr) {
-          console.error('Error cleaning up Cloudinary upload:', cloudinaryErr);
-        }
-      }
-
-      res.status(500).json({
-        success: false,
-        message: process.env.NODE_ENV === 'development'
-          ? error.message
-          : 'Failed to save gallery item'
-      });
-    }
-  }
-);
-
-// Update gallery item metadata
-router.put('/:id', auth, sanitize, async (req, res) => {
+// Add new gallery item
+router.post('/', auth, upload.single('image'), validateGalleryItem, async (req, res) => {
   try {
+    console.log('Received gallery item creation request');
+    console.log('Request body:', req.body);
+    console.log('File details:', req.file);
+
+    if (!req.file) {
+      console.error('No file uploaded');
+      return res.status(400).json({ message: 'Image is required' });
+    }
+
     const { title, description, category, section, year } = req.body;
     
-    const updates = {
-      ...(title && { title: title.trim() }),
-      ...(description && { description: description.trim() }),
-      ...(category && { category }),
-      ...(section && { section }),
-      ...(year && { year })
-    };
+    if (!title) {
+      console.error('Title is missing');
+      return res.status(400).json({ message: 'Title is required' });
+    }
 
-    if (Object.keys(updates).length === 0) {
+    if (!category) {
+      console.error('Category is missing');
+      return res.status(400).json({ message: 'Category is required' });
+    }
+
+    // Validate category
+    const validCategories = ['events', 'movies', 'celebrations', 'awards', 'behind-the-scenes', 'other'];
+    if (!validCategories.includes(category)) {
       return res.status(400).json({
         success: false,
-        message: 'No valid fields provided for update'
+        message: `Invalid category. Must be one of: ${validCategories.join(', ')}`
       });
+    }
+
+    // Validate section
+    const validSections = ['home', 'gallery', 'about', 'events'];
+    if (section && !validSections.includes(section)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid section. Must be one of: ${validSections.join(', ')}`
+      });
+    }
+
+    // Upload image to Cloudinary
+    console.log('Uploading image to Cloudinary...');
+    const cloudinaryResult = await uploadToCloudinary(req.file, 'gallery');
+    console.log('Cloudinary upload result:', cloudinaryResult);
+
+    // Create gallery item with Cloudinary URL
+    const itemData = {
+      title,
+      description: description || '',
+      image: cloudinaryResult.url,
+      cloudinary_id: cloudinaryResult.public_id,
+      category,
+      section: section || 'gallery',
+      year: year || new Date().getFullYear()
+    };
+
+    console.log('Creating gallery item with data:', itemData);
+
+    const item = new Gallery(itemData);
+    console.log('Gallery model created:', item);
+
+    const savedItem = await item.save();
+    console.log('Gallery item saved successfully:', savedItem);
+    
+    return res.status(201).json({
+      success: true,
+      data: savedItem,
+      message: 'Gallery item created successfully'
+    });
+
+  } catch (err) {
+    console.error('Error in gallery item creation:', err);
+
+    // Send appropriate error response
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Validation error', 
+        errors: Object.keys(err.errors).reduce((acc, key) => {
+          acc[key] = err.errors[key].message;
+          return acc;
+        }, {})
+      });
+    }
+
+    return res.status(500).json({ 
+      success: false,
+      message: 'Internal server error',
+      error: err.message,
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  }
+});
+
+// Update gallery item
+router.put('/:id', auth, upload.single('image'), validateGalleryItem, async (req, res) => {
+  try {
+    console.log('Updating gallery item:', req.params.id);
+    console.log('Update data:', req.body);
+    console.log('File:', req.file);
+
+    const existingItem = await Gallery.findById(req.params.id);
+    if (!existingItem) {
+      console.error('Gallery item not found:', req.params.id);
+      return res.status(404).json({ message: 'Gallery item not found' });
+    }
+
+    // Check if user is authorized to update
+    if (existingItem.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this item'
+      });
+    }
+
+    const updateData = {
+      title: req.body.title || existingItem.title,
+      description: req.body.description || existingItem.description,
+      category: req.body.category || existingItem.category,
+      section: req.body.section || existingItem.section,
+      year: req.body.year || existingItem.year
+    };
+
+    if (req.file) {
+      // Delete old image from Cloudinary
+      if (existingItem.cloudinary_id) {
+        await deleteFromCloudinary(existingItem.cloudinary_id);
+        console.log('Deleted old image from Cloudinary:', existingItem.cloudinary_id);
+      }
+
+      // Upload new image to Cloudinary
+      const cloudinaryResult = await uploadToCloudinary(req.file, 'gallery');
+      console.log('Uploaded new image to Cloudinary:', cloudinaryResult);
+
+      updateData.image = cloudinaryResult.url;
+      updateData.cloudinary_id = cloudinaryResult.public_id;
     }
 
     const updatedItem = await Gallery.findByIdAndUpdate(
       req.params.id,
-      updates,
-      { 
-        new: true, 
-        runValidators: true,
-        lean: true 
-      }
+      updateData,
+      { new: true }
     );
 
-    if (!updatedItem) {
-      return res.status(404).json({
-        success: false,
-        message: 'Gallery item not found'
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Gallery item updated',
-      data: updatedItem
-    });
-  } catch (error) {
-    console.error('Update error:', {
-      error: error.message,
-      stack: error.stack,
-      params: req.params,
-      body: req.body
-    });
-    res.status(500).json({
-      success: false,
-      message: process.env.NODE_ENV === 'development'
-        ? error.message
-        : 'Failed to update gallery item'
-    });
+    res.json(updatedItem);
+  } catch (err) {
+    console.error('Error updating gallery item:', err);
+    res.status(500).json({ message: err.message });
   }
 });
 
 // Delete gallery item
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const item = await Gallery.findById(req.params.id).lean();
-    
+    console.log('Attempting to delete gallery item:', req.params.id);
+
+    const item = await Gallery.findById(req.params.id);
     if (!item) {
+      console.log('Gallery item not found:', req.params.id);
+      return res.status(404).json({ message: 'Gallery item not found' });
+    }
+
+    console.log('Found gallery item to delete:', {
+      id: item._id,
+      title: item.title,
+      cloudinary_id: item.cloudinary_id
+    });
+
+    // Delete image from Cloudinary
+    if (item.cloudinary_id) {
+      await deleteFromCloudinary(item.cloudinary_id);
+      console.log('Successfully deleted image from Cloudinary');
+    }
+
+    // Delete the item from database
+    console.log('Deleting gallery item from database...');
+    const deleteResult = await Gallery.deleteOne({ _id: req.params.id });
+    console.log('Delete result:', deleteResult);
+
+    if (deleteResult.deletedCount === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Gallery item not found'
+        message: 'Gallery item not found or already deleted'
       });
     }
-
-    // First delete from Cloudinary
-    try {
-      await cloudinary.uploader.destroy(item.cloudinaryPublicId, {
-        resource_type: 'image',
-        invalidate: true
-      });
-    } catch (cloudinaryErr) {
-      console.error('Cloudinary deletion error:', cloudinaryErr);
-      // Continue with MongoDB deletion even if Cloudinary fails
-    }
-
-    // Then delete from MongoDB
-    await Gallery.deleteOne({ _id: req.params.id });
 
     res.json({
       success: true,
       message: 'Gallery item deleted successfully'
     });
-  } catch (error) {
-    console.error('Deletion error:', {
-      error: error.message,
-      stack: error.stack,
-      params: req.params
-    });
+  } catch (err) {
+    console.error('Error deleting gallery item:', err);
     res.status(500).json({
       success: false,
-      message: process.env.NODE_ENV === 'development'
-        ? error.message
-        : 'Failed to delete gallery item'
+      message: err.message || 'Server error while deleting gallery item'
     });
+  }
+});
+
+// Delete all gallery items
+router.delete('/', async (req, res) => {
+  try {
+    // Get all items to delete their Cloudinary images
+    const items = await Gallery.find();
+    
+    // Delete all images from Cloudinary
+    for (const item of items) {
+      if (item.cloudinary_id) {
+        await deleteFromCloudinary(item.cloudinary_id);
+      }
+    }
+
+    // Delete all items from database
+    await Gallery.deleteMany({});
+    
+    res.json({ message: 'All gallery items deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 

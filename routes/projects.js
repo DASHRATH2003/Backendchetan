@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const Project = require('../models/Project');
+const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
 
 // Get the uploads directory path
 const uploadsDir = path.join(__dirname, '..', 'uploads');
@@ -14,36 +15,8 @@ if (!fs.existsSync(uploadsDir)) {
   console.log('Created uploads directory:', uploadsDir);
 }
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    // Get the absolute path to the uploads directory
-    const uploadsDir = path.join(__dirname, '..', 'uploads');
-    
-    // Ensure directory exists before saving
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-      console.log('Created uploads directory at:', uploadsDir);
-    }
-    
-    console.log('Saving file to:', uploadsDir);
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    // Generate a unique filename with original extension
-    const timestamp = Date.now();
-    const originalExt = path.extname(file.originalname);
-    const filename = `${timestamp}${originalExt}`;
-    console.log('Generated filename:', filename);
-    
-    // Log the complete file path that will be used
-    const fullPath = path.join(__dirname, '..', 'uploads', filename);
-    console.log('Full file path will be:', fullPath);
-    
-    cb(null, filename);
-  }
-});
-
+// Configure multer for memory storage
+const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
@@ -80,14 +53,7 @@ router.get('/', async (req, res) => {
     console.log('Fetching projects...');
     const projects = await Project.find().sort({ createdAt: -1 });
     console.log(`Found ${projects.length} projects`);
-
-    // Add full URLs to the projects
-    const projectsWithUrls = projects.map(project => ({
-      ...project.toObject(),
-      imageUrl: getImageUrl(req, project.image)
-    }));
-
-    res.json(projectsWithUrls);
+    res.json(projects);
   } catch (err) {
     console.error('Error fetching projects:', err);
     res.status(500).json({ message: err.message });
@@ -96,8 +62,6 @@ router.get('/', async (req, res) => {
 
 // Add new project
 router.post('/', upload.single('image'), async (req, res) => {
-  let uploadedFilePath = null;
-  
   try {
     console.log('Received project creation request');
     console.log('Request body:', req.body);
@@ -115,43 +79,24 @@ router.post('/', upload.single('image'), async (req, res) => {
       return res.status(400).json({ message: 'Title is required' });
     }
 
-    // Store the uploaded file path for potential cleanup
-    uploadedFilePath = path.join(uploadsDir, req.file.filename);
-    
-    // Verify file was saved
-    console.log('Checking if file exists at:', uploadedFilePath);
-    if (!fs.existsSync(uploadedFilePath)) {
-      console.error('File was not saved:', uploadedFilePath);
-      return res.status(500).json({ message: 'File upload failed - file not found after save' });
-    }
-    
-    // Verify file is readable
-    try {
-      await fs.promises.access(uploadedFilePath, fs.constants.R_OK);
-      console.log('File is readable:', uploadedFilePath);
-    } catch (err) {
-      console.error('File is not readable:', err);
-      return res.status(500).json({ message: 'File upload failed - file not readable' });
+    if (!category) {
+      console.error('Category is missing');
+      return res.status(400).json({ message: 'Category is required' });
     }
 
-    // Get file stats
-    const stats = await fs.promises.stat(uploadedFilePath);
-    console.log('File stats:', {
-      size: stats.size,
-      created: stats.birthtime,
-      modified: stats.mtime
-    });
+    // Upload image to Cloudinary
+    console.log('Uploading image to Cloudinary...');
+    const cloudinaryResult = await uploadToCloudinary(req.file, 'projects');
+    console.log('Cloudinary upload result:', cloudinaryResult);
 
-    // Store only the relative path
-    const image = `/uploads/${req.file.filename}`;
-
-    // Create project with all required fields
+    // Create project with Cloudinary URL
     const projectData = {
       title,
       description: description || '',
-      image,
-      category: category || '',
-      section: section || 'Banner',
+      image: cloudinaryResult.url,
+      cloudinary_id: cloudinaryResult.public_id,
+      category,
+      section: section || 'Featured',
       completed: completed === 'true',
       year: year || new Date().getFullYear().toString()
     };
@@ -164,30 +109,19 @@ router.post('/', upload.single('image'), async (req, res) => {
     const savedProject = await project.save();
     console.log('Project saved successfully:', savedProject);
     
-    // Add the full URL for the response
-    const projectWithUrl = {
-      ...savedProject.toObject(),
-      imageUrl: getImageUrl(req, savedProject.image)
-    };
-    
-    return res.status(201).json(projectWithUrl);
+    return res.status(201).json({
+      success: true,
+      data: savedProject,
+      message: 'Project created successfully'
+    });
 
   } catch (err) {
     console.error('Error in project creation:', err);
 
-    // Clean up uploaded file if it exists and there was an error
-    if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-      try {
-        fs.unlinkSync(uploadedFilePath);
-        console.log('Cleaned up uploaded file after error');
-      } catch (cleanupErr) {
-        console.error('Error cleaning up file:', cleanupErr);
-      }
-    }
-
     // Send appropriate error response
     if (err.name === 'ValidationError') {
       return res.status(400).json({ 
+        success: false,
         message: 'Validation error', 
         errors: Object.keys(err.errors).reduce((acc, key) => {
           acc[key] = err.errors[key].message;
@@ -197,6 +131,7 @@ router.post('/', upload.single('image'), async (req, res) => {
     }
 
     return res.status(500).json({ 
+      success: false,
       message: 'Internal server error',
       error: err.message,
       details: process.env.NODE_ENV === 'development' ? err.stack : undefined
@@ -227,24 +162,18 @@ router.put('/:id', upload.single('image'), async (req, res) => {
     };
 
     if (req.file) {
-      // Delete old image if it exists
-      if (existingProject.image) {
-        const oldImagePath = path.join(uploadsDir, path.basename(existingProject.image));
-        if (fs.existsSync(oldImagePath)) {
-          fs.unlinkSync(oldImagePath);
-          console.log('Deleted old image:', oldImagePath);
-        }
+      // Delete old image from Cloudinary
+      if (existingProject.cloudinary_id) {
+        await deleteFromCloudinary(existingProject.cloudinary_id);
+        console.log('Deleted old image from Cloudinary:', existingProject.cloudinary_id);
       }
 
-      // Verify new file was saved
-      const newFilePath = path.join(uploadsDir, req.file.filename);
-      if (!fs.existsSync(newFilePath)) {
-        console.error('New file was not saved:', newFilePath);
-        return res.status(500).json({ message: 'File upload failed - file not found after save' });
-      }
-      console.log('New file saved successfully at:', newFilePath);
+      // Upload new image to Cloudinary
+      const cloudinaryResult = await uploadToCloudinary(req.file, 'projects');
+      console.log('Uploaded new image to Cloudinary:', cloudinaryResult);
 
-      updateData.image = `/uploads/${req.file.filename}`;
+      updateData.image = cloudinaryResult.url;
+      updateData.cloudinary_id = cloudinaryResult.public_id;
     }
 
     const updatedProject = await Project.findByIdAndUpdate(
@@ -253,13 +182,7 @@ router.put('/:id', upload.single('image'), async (req, res) => {
       { new: true }
     );
 
-    // Return the full item data including the complete image URL
-    const projectWithUrl = {
-      ...updatedProject.toObject(),
-      imageUrl: getImageUrl(req, updatedProject.image)
-    };
-
-    res.json(projectWithUrl);
+    res.json(updatedProject);
   } catch (err) {
     console.error('Error updating project:', err);
     res.status(500).json({ message: err.message });
@@ -269,42 +192,61 @@ router.put('/:id', upload.single('image'), async (req, res) => {
 // Delete project
 router.delete('/:id', async (req, res) => {
   try {
+    console.log('Attempting to delete project:', req.params.id);
+
     const project = await Project.findById(req.params.id);
     if (!project) {
+      console.log('Project not found:', req.params.id);
       return res.status(404).json({ message: 'Project not found' });
     }
 
-    // Delete the image file if it exists
-    if (project.image) {
-      const imagePath = path.join(uploadsDir, path.basename(project.image));
-      if (fs.existsSync(imagePath)) {
-        fs.unlinkSync(imagePath);
-        console.log('Deleted image file:', imagePath);
-      }
+    console.log('Found project to delete:', {
+      id: project._id,
+      title: project.title,
+      cloudinary_id: project.cloudinary_id
+    });
+
+    // Delete image from Cloudinary
+    if (project.cloudinary_id) {
+      await deleteFromCloudinary(project.cloudinary_id);
+      console.log('Successfully deleted image from Cloudinary');
     }
 
-    await Project.findByIdAndDelete(req.params.id);
-    console.log('Project deleted successfully:', req.params.id);
-    res.json({ message: 'Project deleted successfully' });
+    // Delete the project from database
+    console.log('Deleting project from database...');
+    const deleteResult = await Project.deleteOne({ _id: req.params.id });
+    console.log('Delete result:', deleteResult);
+
+    if (deleteResult.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Project not found or already deleted'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Project deleted successfully'
+    });
   } catch (err) {
     console.error('Error deleting project:', err);
-    res.status(500).json({ message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message || 'Server error while deleting project'
+    });
   }
 });
 
 // Delete all projects
 router.delete('/', async (req, res) => {
   try {
-    // Get all projects to get their image paths
+    // Get all projects to delete their Cloudinary images
     const projects = await Project.find();
     
-    // Delete all image files
+    // Delete all images from Cloudinary
     for (const project of projects) {
-      if (project.image) {
-        const imagePath = path.join(uploadsDir, path.basename(project.image));
-        if (fs.existsSync(imagePath)) {
-          fs.unlinkSync(imagePath);
-        }
+      if (project.cloudinary_id) {
+        await deleteFromCloudinary(project.cloudinary_id);
       }
     }
 
@@ -341,6 +283,53 @@ router.post('/cleanup', async (req, res) => {
   } catch (err) {
     console.error('Error during cleanup:', err);
     res.status(500).json({ message: err.message });
+  }
+});
+
+// Add Same To Same project
+router.post('/same-to-same', async (req, res) => {
+  try {
+    // Read the image file
+    const imagePath = path.join(__dirname, '..', 'uploads', 'project-clothnearya.jpeg');
+    const imageBuffer = await fs.promises.readFile(imagePath);
+
+    // Create a unique filename
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(7);
+    const filename = `project-${timestamp}-${randomString}.jpeg`;
+    const newImagePath = path.join(__dirname, '..', 'uploads', filename);
+
+    // Save the image
+    await fs.promises.writeFile(newImagePath, imageBuffer);
+
+    // Create project data
+    const projectData = {
+      title: 'Same To Same',
+      description: 'Same To Same - A captivating advertisement for Clothnearya',
+      image: `/uploads/${filename}`,
+      imageUrl: `http://localhost:5000/uploads/${filename}`,
+      category: 'Advertisement',
+      section: 'Featured',
+      completed: true,
+      year: new Date().getFullYear().toString()
+    };
+
+    // Create and save the project
+    const project = new Project(projectData);
+    const savedProject = await project.save();
+
+    res.status(201).json({
+      success: true,
+      data: savedProject,
+      message: 'Same To Same project created successfully'
+    });
+  } catch (err) {
+    console.error('Error creating Same To Same project:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create Same To Same project',
+      error: err.message
+    });
   }
 });
 

@@ -1,4 +1,6 @@
 const mongoose = require('mongoose');
+const path = require('path');
+const fs = require('fs');
 
 const projectSchema = new mongoose.Schema({
   title: {
@@ -15,23 +17,30 @@ const projectSchema = new mongoose.Schema({
   },
   image: {
     type: String,
-    required: [true, 'Image path is required'],
+    required: [true, 'Image URL is required'],
     validate: {
       validator: function(v) {
-        return v.startsWith('/uploads/');
+        return v && v.startsWith('http');
       },
-      message: 'Image path must start with /uploads/'
+      message: 'Image URL must be a valid URL'
     }
+  },
+  cloudinary_id: {
+    type: String,
+    required: [true, 'Cloudinary ID is required']
   },
   category: {
     type: String,
     trim: true,
-    default: ''
+    required: [true, 'Category is required']
   },
   section: {
     type: String,
-    enum: ['Banner', 'Featured', 'Regular'],
-    default: 'Banner'
+    enum: {
+      values: ['Banner', 'Featured', 'Regular'],
+      message: 'Section must be one of: Banner, Featured, Regular'
+    },
+    default: 'Featured'
   },
   completed: {
     type: Boolean,
@@ -53,6 +62,21 @@ projectSchema.post('save', function(error, doc, next) {
     next(new Error('A project with this title already exists'));
   } else {
     next(error);
+  }
+});
+
+// Add pre-remove middleware to clean up Cloudinary images
+projectSchema.pre('remove', async function(next) {
+  try {
+    if (this.cloudinary_id) {
+      const { deleteFromCloudinary } = require('../config/cloudinary');
+      await deleteFromCloudinary(this.cloudinary_id);
+      console.log('Successfully deleted image from Cloudinary:', this.cloudinary_id);
+    }
+    next();
+  } catch (err) {
+    console.error('Error deleting image from Cloudinary:', err);
+    next(err);
   }
 });
 
