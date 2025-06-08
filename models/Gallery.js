@@ -24,17 +24,18 @@ const gallerySchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    trim: true,
-    required: [true, 'Category is required']
+    required: [true, 'Category is required'],
+    enum: {
+      values: ['events', 'movies', 'celebrations', 'awards', 'behind-the-scenes', 'other'],
+      message: 'Invalid category'
+    }
   },
   createdBy: {
     type: String,
-    default: 'Admin'
+    required: [true, 'Creator ID is required']
   }
 }, {
-  timestamps: true,
-  toJSON: { getters: true, virtuals: true },
-  toObject: { getters: true, virtuals: true }
+  timestamps: true
 });
 
 // Add error handling middleware
@@ -61,6 +62,4 @@ gallerySchema.pre('remove', async function(next) {
   }
 });
 
-const Gallery = mongoose.model('Gallery', gallerySchema);
-
-module.exports = Gallery;
+module.exports = mongoose.model('Gallery', gallerySchema);

@@ -38,15 +38,6 @@ const upload = multer({
   }
 });
 
-// Helper function to generate full image URL
-const getImageUrl = (req, imagePath) => {
-  const protocol = process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
-  const host = process.env.NODE_ENV === 'production' 
-    ? 'backendchetan.onrender.com'
-    : req.get('host');
-  return `${protocol}://${host}${imagePath}`;
-};
-
 // Get all projects
 router.get('/', async (req, res) => {
   try {
@@ -63,31 +54,52 @@ router.get('/', async (req, res) => {
 // Add new project
 router.post('/', upload.single('image'), async (req, res) => {
   try {
-    console.log('Received project creation request');
-    console.log('Request body:', req.body);
-    console.log('File details:', req.file);
+    console.log('📤 Starting project creation...');
+    console.log('📦 Request body:', {
+      title: req.body.title,
+      category: req.body.category,
+      section: req.body.section
+    });
 
     if (!req.file) {
-      console.error('No file uploaded');
-      return res.status(400).json({ message: 'Image is required' });
+      console.error('❌ No file uploaded');
+      return res.status(400).json({ 
+        success: false,
+        message: 'Image is required' 
+      });
     }
+
+    console.log('📄 File details:', {
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
 
     const { title, description, category, section, completed, year } = req.body;
     
     if (!title) {
-      console.error('Title is missing');
-      return res.status(400).json({ message: 'Title is required' });
+      console.error('❌ Title is missing');
+      return res.status(400).json({ 
+        success: false,
+        message: 'Title is required' 
+      });
     }
 
     if (!category) {
-      console.error('Category is missing');
-      return res.status(400).json({ message: 'Category is required' });
+      console.error('❌ Category is missing');
+      return res.status(400).json({ 
+        success: false,
+        message: 'Category is required' 
+      });
     }
 
     // Upload image to Cloudinary
-    console.log('Uploading image to Cloudinary...');
+    console.log('☁️ Uploading image to Cloudinary...');
     const cloudinaryResult = await uploadToCloudinary(req.file, 'projects');
-    console.log('Cloudinary upload result:', cloudinaryResult);
+    console.log('✅ Cloudinary upload successful:', {
+      url: cloudinaryResult.url,
+      public_id: cloudinaryResult.public_id
+    });
 
     // Create project with Cloudinary URL
     const projectData = {
@@ -101,13 +113,16 @@ router.post('/', upload.single('image'), async (req, res) => {
       year: year || new Date().getFullYear().toString()
     };
 
-    console.log('Creating project with data:', projectData);
+    console.log('📝 Creating project with data:', projectData);
 
     const project = new Project(projectData);
-    console.log('Project model created:', project);
-
     const savedProject = await project.save();
-    console.log('Project saved successfully:', savedProject);
+    
+    console.log('✅ Project saved successfully:', {
+      id: savedProject._id,
+      title: savedProject.title,
+      image: savedProject.image
+    });
     
     return res.status(201).json({
       success: true,
@@ -116,7 +131,7 @@ router.post('/', upload.single('image'), async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Error in project creation:', err);
+    console.error('❌ Error in project creation:', err);
 
     // Send appropriate error response
     if (err.name === 'ValidationError') {
@@ -132,9 +147,8 @@ router.post('/', upload.single('image'), async (req, res) => {
 
     return res.status(500).json({ 
       success: false,
-      message: 'Internal server error',
-      error: err.message,
-      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      message: err.message || 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });
@@ -142,14 +156,24 @@ router.post('/', upload.single('image'), async (req, res) => {
 // Update project
 router.put('/:id', upload.single('image'), async (req, res) => {
   try {
-    console.log('Updating project:', req.params.id);
-    console.log('Update data:', req.body);
-    console.log('File:', req.file);
+    console.log('🔄 Updating project:', req.params.id);
+    console.log('📦 Update data:', req.body);
+    
+    if (req.file) {
+      console.log('📄 New file:', {
+        filename: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size
+      });
+    }
 
     const existingProject = await Project.findById(req.params.id);
     if (!existingProject) {
-      console.error('Project not found:', req.params.id);
-      return res.status(404).json({ message: 'Project not found' });
+      console.error('❌ Project not found:', req.params.id);
+      return res.status(404).json({ 
+        success: false,
+        message: 'Project not found' 
+      });
     }
 
     const updateData = {
@@ -164,13 +188,18 @@ router.put('/:id', upload.single('image'), async (req, res) => {
     if (req.file) {
       // Delete old image from Cloudinary
       if (existingProject.cloudinary_id) {
+        console.log('🗑️ Deleting old image from Cloudinary:', existingProject.cloudinary_id);
         await deleteFromCloudinary(existingProject.cloudinary_id);
-        console.log('Deleted old image from Cloudinary:', existingProject.cloudinary_id);
+        console.log('✅ Old image deleted successfully');
       }
 
       // Upload new image to Cloudinary
+      console.log('☁️ Uploading new image to Cloudinary...');
       const cloudinaryResult = await uploadToCloudinary(req.file, 'projects');
-      console.log('Uploaded new image to Cloudinary:', cloudinaryResult);
+      console.log('✅ New image uploaded successfully:', {
+        url: cloudinaryResult.url,
+        public_id: cloudinaryResult.public_id
+      });
 
       updateData.image = cloudinaryResult.url;
       updateData.cloudinary_id = cloudinaryResult.public_id;
@@ -182,40 +211,51 @@ router.put('/:id', upload.single('image'), async (req, res) => {
       { new: true }
     );
 
-    res.json(updatedProject);
+    console.log('✅ Project updated successfully:', {
+      id: updatedProject._id,
+      title: updatedProject.title,
+      image: updatedProject.image
+    });
+
+    res.json({
+      success: true,
+      data: updatedProject,
+      message: 'Project updated successfully'
+    });
   } catch (err) {
-    console.error('Error updating project:', err);
-    res.status(500).json({ message: err.message });
+    console.error('❌ Error updating project:', err);
+    res.status(500).json({ 
+      success: false,
+      message: err.message || 'Server error while updating project'
+    });
   }
 });
 
 // Delete project
 router.delete('/:id', async (req, res) => {
   try {
-    console.log('Attempting to delete project:', req.params.id);
+    console.log('🗑️ Attempting to delete project:', req.params.id);
 
     const project = await Project.findById(req.params.id);
     if (!project) {
-      console.log('Project not found:', req.params.id);
-      return res.status(404).json({ message: 'Project not found' });
+      console.log('❌ Project not found:', req.params.id);
+      return res.status(404).json({ 
+        success: false,
+        message: 'Project not found' 
+      });
     }
-
-    console.log('Found project to delete:', {
-      id: project._id,
-      title: project.title,
-      cloudinary_id: project.cloudinary_id
-    });
 
     // Delete image from Cloudinary
     if (project.cloudinary_id) {
+      console.log('☁️ Deleting image from Cloudinary:', project.cloudinary_id);
       await deleteFromCloudinary(project.cloudinary_id);
-      console.log('Successfully deleted image from Cloudinary');
+      console.log('✅ Successfully deleted image from Cloudinary');
     }
 
     // Delete the project from database
-    console.log('Deleting project from database...');
+    console.log('🗄️ Deleting project from database...');
     const deleteResult = await Project.deleteOne({ _id: req.params.id });
-    console.log('Delete result:', deleteResult);
+    console.log('✅ Delete result:', deleteResult);
 
     if (deleteResult.deletedCount === 0) {
       return res.status(404).json({
@@ -229,7 +269,7 @@ router.delete('/:id', async (req, res) => {
       message: 'Project deleted successfully'
     });
   } catch (err) {
-    console.error('Error deleting project:', err);
+    console.error('❌ Error deleting project:', err);
     res.status(500).json({
       success: false,
       message: err.message || 'Server error while deleting project'
@@ -240,22 +280,36 @@ router.delete('/:id', async (req, res) => {
 // Delete all projects
 router.delete('/', async (req, res) => {
   try {
+    console.log('🗑️ Attempting to delete all projects...');
+    
     // Get all projects to delete their Cloudinary images
     const projects = await Project.find();
+    console.log(`Found ${projects.length} projects to delete`);
     
     // Delete all images from Cloudinary
     for (const project of projects) {
       if (project.cloudinary_id) {
+        console.log('☁️ Deleting image from Cloudinary:', project.cloudinary_id);
         await deleteFromCloudinary(project.cloudinary_id);
+        console.log('✅ Successfully deleted image from Cloudinary');
       }
     }
 
     // Delete all projects from database
-    await Project.deleteMany({});
-    
-    res.json({ message: 'All projects deleted successfully' });
+    console.log('🗄️ Deleting all projects from database...');
+    const deleteResult = await Project.deleteMany({});
+    console.log('✅ Delete result:', deleteResult);
+
+    res.json({
+      success: true,
+      message: `Successfully deleted ${deleteResult.deletedCount} projects`
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('❌ Error deleting all projects:', err);
+    res.status(500).json({
+      success: false,
+      message: err.message || 'Server error while deleting all projects'
+    });
   }
 });
 

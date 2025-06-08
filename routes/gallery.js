@@ -81,30 +81,48 @@ router.get('/', async (req, res) => {
 // Add new gallery item
 router.post('/', auth, upload.single('image'), validateGalleryItem, async (req, res) => {
   try {
-    console.log('Received gallery item creation request');
-    console.log('Request body:', req.body);
-    console.log('File details:', req.file);
-
+    console.log('🚀 Starting gallery item creation...');
+    console.log('📦 Request body:', {
+      title: req.body.title,
+      category: req.body.category
+    });
+    
     if (!req.file) {
-      console.error('No file uploaded');
-      return res.status(400).json({ message: 'Image is required' });
+      console.error('❌ No file uploaded');
+      return res.status(400).json({ 
+        success: false,
+        message: 'Image is required' 
+      });
     }
+
+    console.log('📄 File details:', {
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
 
     const { title, description, category, section, year } = req.body;
     
     if (!title) {
-      console.error('Title is missing');
-      return res.status(400).json({ message: 'Title is required' });
+      console.error('❌ Title is missing');
+      return res.status(400).json({ 
+        success: false,
+        message: 'Title is required' 
+      });
     }
 
     if (!category) {
-      console.error('Category is missing');
-      return res.status(400).json({ message: 'Category is required' });
+      console.error('❌ Category is missing');
+      return res.status(400).json({ 
+        success: false,
+        message: 'Category is required' 
+      });
     }
 
     // Validate category
     const validCategories = ['events', 'movies', 'celebrations', 'awards', 'behind-the-scenes', 'other'];
     if (!validCategories.includes(category)) {
+      console.error('❌ Invalid category:', category);
       return res.status(400).json({
         success: false,
         message: `Invalid category. Must be one of: ${validCategories.join(', ')}`
@@ -121,9 +139,12 @@ router.post('/', auth, upload.single('image'), validateGalleryItem, async (req, 
     }
 
     // Upload image to Cloudinary
-    console.log('Uploading image to Cloudinary...');
+    console.log('☁️ Uploading image to Cloudinary...');
     const cloudinaryResult = await uploadToCloudinary(req.file, 'gallery');
-    console.log('Cloudinary upload result:', cloudinaryResult);
+    console.log('✅ Cloudinary upload successful:', {
+      url: cloudinaryResult.url,
+      public_id: cloudinaryResult.public_id
+    });
 
     // Create gallery item with Cloudinary URL
     const itemData = {
@@ -133,16 +154,20 @@ router.post('/', auth, upload.single('image'), validateGalleryItem, async (req, 
       cloudinary_id: cloudinaryResult.public_id,
       category,
       section: section || 'gallery',
-      year: year || new Date().getFullYear()
+      year: year || new Date().getFullYear(),
+      createdBy: req.user.id
     };
 
-    console.log('Creating gallery item with data:', itemData);
+    console.log('📝 Creating gallery item with data:', itemData);
 
     const item = new Gallery(itemData);
-    console.log('Gallery model created:', item);
-
     const savedItem = await item.save();
-    console.log('Gallery item saved successfully:', savedItem);
+    
+    console.log('✅ Gallery item saved successfully:', {
+      id: savedItem._id,
+      title: savedItem.title,
+      image: savedItem.image
+    });
     
     return res.status(201).json({
       success: true,
@@ -151,7 +176,7 @@ router.post('/', auth, upload.single('image'), validateGalleryItem, async (req, 
     });
 
   } catch (err) {
-    console.error('Error in gallery item creation:', err);
+    console.error('❌ Error in gallery item creation:', err);
 
     // Send appropriate error response
     if (err.name === 'ValidationError') {
@@ -167,9 +192,8 @@ router.post('/', auth, upload.single('image'), validateGalleryItem, async (req, 
 
     return res.status(500).json({ 
       success: false,
-      message: 'Internal server error',
-      error: err.message,
-      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      message: err.message || 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });
@@ -234,30 +258,28 @@ router.put('/:id', auth, upload.single('image'), validateGalleryItem, async (req
 // Delete gallery item
 router.delete('/:id', auth, async (req, res) => {
   try {
-    console.log('Attempting to delete gallery item:', req.params.id);
+    console.log('🗑️ Attempting to delete gallery item:', req.params.id);
 
     const item = await Gallery.findById(req.params.id);
     if (!item) {
-      console.log('Gallery item not found:', req.params.id);
-      return res.status(404).json({ message: 'Gallery item not found' });
+      console.log('❌ Gallery item not found:', req.params.id);
+      return res.status(404).json({ 
+        success: false,
+        message: 'Gallery item not found' 
+      });
     }
-
-    console.log('Found gallery item to delete:', {
-      id: item._id,
-      title: item.title,
-      cloudinary_id: item.cloudinary_id
-    });
 
     // Delete image from Cloudinary
     if (item.cloudinary_id) {
+      console.log('☁️ Deleting image from Cloudinary:', item.cloudinary_id);
       await deleteFromCloudinary(item.cloudinary_id);
-      console.log('Successfully deleted image from Cloudinary');
+      console.log('✅ Successfully deleted image from Cloudinary');
     }
 
     // Delete the item from database
-    console.log('Deleting gallery item from database...');
+    console.log('🗄️ Deleting gallery item from database...');
     const deleteResult = await Gallery.deleteOne({ _id: req.params.id });
-    console.log('Delete result:', deleteResult);
+    console.log('✅ Delete result:', deleteResult);
 
     if (deleteResult.deletedCount === 0) {
       return res.status(404).json({
@@ -271,7 +293,7 @@ router.delete('/:id', auth, async (req, res) => {
       message: 'Gallery item deleted successfully'
     });
   } catch (err) {
-    console.error('Error deleting gallery item:', err);
+    console.error('❌ Error deleting gallery item:', err);
     res.status(500).json({
       success: false,
       message: err.message || 'Server error while deleting gallery item'
