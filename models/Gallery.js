@@ -8,12 +8,6 @@ const gallerySchema = new mongoose.Schema({
     trim: true,
     maxlength: [100, 'Title cannot be more than 100 characters']
   },
-  description: {
-    type: String,
-    default: '',
-    trim: true,
-    maxlength: [1000, 'Description cannot be more than 1000 characters']
-  },
   image: {
     type: String,
     required: [true, 'Image URL is required'],
